@@ -1,0 +1,25 @@
+Eg: 6:00, 6:15, 6:30, 6:45, 7:00
+
+Time trigger - first preference - user selection
+1) Frist play - Rythm Folder(files - 100) - rondom- Only one - (10 Sec to 1 min)
+2) Time speech - Time folder - by time name - (20 sec)
+3) Date speech - Date folder - by date name - (20 sec)
+4) Day speech - Day folder - by day name - (20 sec)
+5) Quotes - Quotes folder - random - (30 sec)
+
+Custom time - multiple time schedule - second preference - start and stop - fade in and fade out - Week day selection - month selections - user selection
+1) Songs play - Songs Folder (multiple folders) (week or month or particular day) - random - song count selection(user selections) - (5-30 mins) - schedule need to show like row. and crud operations.
+
+Hardware - 
+3D print Casing 
+Rashberry pi zero 
+Power adapter 
+Battery
+usb mini to usb converter
+usb to aux converter
+Hdmi mini to hdmi converter 
+Aux cable
+
+Cimos battery connect check to rashberery pi. 
+
+
