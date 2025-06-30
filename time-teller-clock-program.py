@@ -3,7 +3,8 @@ import time
 import random
 import json
 from datetime import datetime
-from playsound import playsound
+import pygame
+import platform
 
 # ========== CONFIG ==========
 BASE_DIR = "Audio-files"  # Change this
@@ -16,34 +17,63 @@ FOLDERS = {
     "day": os.path.join(BASE_DIR, "Day"),
     "quotes": os.path.join(BASE_DIR, "Quotes"),
 }
+
+# Initialize pygame mixer
+pygame.mixer.init()
 # ============================
+
+def play_audio(file_path):
+    if os.path.exists(file_path):
+        print(f"🎵 Playing: {file_path}")
+        pygame.mixer.music.load(file_path)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
 
 def play_random_from(folder):
     files = [f for f in os.listdir(folder) if f.endswith('.mp4')]
     if files:
         filepath = os.path.join(folder, random.choice(files))
-        playsound(filepath)
+        play_audio(filepath)
 
 def play_exact_file(folder, filename):
     filepath = os.path.join(folder, filename)
     if os.path.exists(filepath):
-        playsound(filepath)
+        play_audio(filepath)
+
+def isWindows():
+    if platform.system() == 'Windows':
+        return True
+    else:
+        return False
 
 def get_time_filename():
     now = datetime.now()
-    return now.strftime("time-%-I:%M %p.mp4")
+    if(isWindows()):
+        return now.strftime("time-%#I:%M %p.mp3")
+    else:
+        return now.strftime("time-%-I:%M %p.mp3")
 
 def get_date_filename():
     now = datetime.now()
-    return now.strftime("date-%-d.mp4")
+    if(isWindows()):
+        return now.strftime("date-%#d.mp3")
+    else:
+        return now.strftime("date-%-d.mp3")
 
 def get_month_filename():
     now = datetime.now()
-    return now.strftime("month-%B.mp4")
+    if(isWindows()):
+        return now.strftime("month-%B.mp3")
+    else:
+        return now.strftime("month-%B.mp3")
 
 def get_day_filename():
     now = datetime.now()
-    return now.strftime("day-%A.mp4")
+    if(isWindows()):
+        return now.strftime("day-%A.mp3")
+    else:
+        return now.strftime("day-%A.mp3")
 
 def time_teller():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Playing time teller audio...")
@@ -90,7 +120,7 @@ if __name__ == "__main__":
 
         if should_play_custom(now, schedule_data):
             time_teller()
-        elif now.minute % 1 == 0:
+        elif now.minute % 15 == 0:
             time_teller()
 
         time.sleep(60)
