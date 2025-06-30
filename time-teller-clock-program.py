@@ -6,12 +6,13 @@ from datetime import datetime
 from playsound import playsound
 
 # ========== CONFIG ==========
-BASE_DIR = "your_project_directory"  # Change this
+BASE_DIR = "Audio-files"  # Change this
 SCHEDULE_FILE = os.path.join(BASE_DIR, "schedule.json")
 FOLDERS = {
     "rythem": os.path.join(BASE_DIR, "Rythem"),
     "time": os.path.join(BASE_DIR, "Time"),
     "date": os.path.join(BASE_DIR, "Date"),
+    "month": os.path.join(BASE_DIR, "Month"),
     "day": os.path.join(BASE_DIR, "Day"),
     "quotes": os.path.join(BASE_DIR, "Quotes"),
 }
@@ -30,21 +31,26 @@ def play_exact_file(folder, filename):
 
 def get_time_filename():
     now = datetime.now()
-    return now.strftime("%-I:%M %p voice speech.mp4")
+    return now.strftime("time-%-I:%M %p.mp4")
 
 def get_date_filename():
     now = datetime.now()
-    return now.strftime("%-d %B.mp4")
+    return now.strftime("date-%-d.mp4")
+
+def get_month_filename():
+    now = datetime.now()
+    return now.strftime("month-%B.mp4")
 
 def get_day_filename():
     now = datetime.now()
-    return now.strftime("%A.mp4")
+    return now.strftime("day-%A.mp4")
 
 def time_teller():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Playing time teller audio...")
     play_random_from(FOLDERS['rythem'])
     play_exact_file(FOLDERS['time'], get_time_filename())
     play_exact_file(FOLDERS['date'], get_date_filename())
+    play_exact_file(FOLDERS['month'], get_month_filename())
     play_exact_file(FOLDERS['day'], get_day_filename())
     play_random_from(FOLDERS['quotes'])
 
@@ -88,3 +94,4 @@ if __name__ == "__main__":
             time_teller()
 
         time.sleep(60)
+
