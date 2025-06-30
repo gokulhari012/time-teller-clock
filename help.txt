@@ -1,0 +1,9 @@
+Convert .aac to mp3
+
+https://ffmpeg.org/download.html
+
+ffmpeg -i yourfile.aac yourfile.mp3
+
+for %f in (*.aac) do ffmpeg -i "%f" "%~nf.mp3"
+
+del *.aac

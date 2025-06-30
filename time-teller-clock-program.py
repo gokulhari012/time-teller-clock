@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
         if should_play_custom(now, schedule_data):
             time_teller()
-        elif now.minute % 15 == 0:
+        elif now.minute % 1 == 0:
             time_teller()
 
         time.sleep(60)
