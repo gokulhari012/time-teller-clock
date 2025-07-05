@@ -31,7 +31,7 @@ def play_audio(file_path):
             time.sleep(0.1)
 
 def play_random_from(folder):
-    files = [f for f in os.listdir(folder) if f.endswith('.mp4')]
+    files = [f for f in os.listdir(folder) if f.endswith('.mp3')]
     if files:
         filepath = os.path.join(folder, random.choice(files))
         play_audio(filepath)
@@ -49,10 +49,13 @@ def isWindows():
 
 def get_time_filename():
     now = datetime.now()
+    name = ""
     if(isWindows()):
-        return now.strftime("time-%#I:%M %p.mp3")
+        name = now.strftime("time-%#I %M %p.mp3")
     else:
-        return now.strftime("time-%-I:%M %p.mp3")
+        name = now.strftime("time-%-I %M %p.mp3")
+    #print(name)
+    return name
 
 def get_date_filename():
     now = datetime.now()
@@ -63,17 +66,13 @@ def get_date_filename():
 
 def get_month_filename():
     now = datetime.now()
-    if(isWindows()):
-        return now.strftime("month-%B.mp3")
-    else:
-        return now.strftime("month-%B.mp3")
+    month_file = "month-" + now.strftime("%B").lower() + ".mp3"
+    return month_file
 
 def get_day_filename():
     now = datetime.now()
-    if(isWindows()):
-        return now.strftime("day-%A.mp3")
-    else:
-        return now.strftime("day-%A.mp3")
+    day_file = "day-" + now.strftime("%A").lower() + ".mp3"
+    return day_file
 
 def time_teller():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Playing time teller audio...")
