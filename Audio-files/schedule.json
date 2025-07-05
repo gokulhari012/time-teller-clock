@@ -1,0 +1,13 @@
+[
+  {
+    "time": "06:05",
+    "days": ["monday", "tuesday"],
+    "months": ["june", "july"],
+    "custom_song": "GokulHari.mp3"
+  },
+  {
+    "time": "15:30",
+    "days": ["sunday"],
+    "months": ["all"]
+  }
+]

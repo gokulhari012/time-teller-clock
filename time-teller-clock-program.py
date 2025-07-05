@@ -16,6 +16,7 @@ FOLDERS = {
     "month": os.path.join(BASE_DIR, "Month"),
     "day": os.path.join(BASE_DIR, "Day"),
     "quotes": os.path.join(BASE_DIR, "Quotes"),
+    "custom_song": os.path.join(BASE_DIR, "Custom_songs"),
 }
 
 # Initialize pygame mixer
@@ -74,7 +75,7 @@ def get_day_filename():
     day_file = "day-" + now.strftime("%A").lower() + ".mp3"
     return day_file
 
-def time_teller():
+def time_teller(custom_song=None):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Playing time teller audio...")
     play_random_from(FOLDERS['rythem'])
     play_exact_file(FOLDERS['time'], get_time_filename())
@@ -82,6 +83,8 @@ def time_teller():
     play_exact_file(FOLDERS['month'], get_month_filename())
     play_exact_file(FOLDERS['day'], get_day_filename())
     play_random_from(FOLDERS['quotes'])
+    if custom_song:
+        play_exact_file(FOLDERS['custom_song'],custom_song)
 
 def load_schedule():
     if not os.path.exists(SCHEDULE_FILE):
@@ -96,9 +99,12 @@ def should_play_custom(now, schedule):
 
     for entry in schedule:
         if entry["time"] == current_time:
-            if "All" in entry["days"] or current_day in entry["days"]:
-                if "All" in entry["months"] or current_month in entry["months"]:
-                    return True
+            if "all" in entry["days"] or current_day.lower() in entry["days"]:
+                if "all" in entry["months"] or current_month.lower() in entry["months"]:
+                    if "custom_song" in entry:
+                        return entry["custom_song"]
+                    else: 
+                        True
     return False
 
 def wait_for_next_minute():
@@ -116,9 +122,12 @@ if __name__ == "__main__":
     while True:
         wait_for_next_minute()
         now = datetime.now()
-
-        if should_play_custom(now, schedule_data):
-            time_teller()
+        song_name = should_play_custom(now, schedule_data)
+        if song_name:
+            if song_name==True:
+                time_teller()
+            else:
+                time_teller(custom_song=song_name)
         elif now.minute % 15 == 0:
             time_teller()
 
