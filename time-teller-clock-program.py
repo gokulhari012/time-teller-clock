@@ -29,7 +29,7 @@ GPIO.output(output_pin_failed, GPIO.LOW)
 
 
 # ========== CONFIG ==========
-BASE_DIR = "Audio-files"  # Change this
+BASE_DIR = "/home/pi/time-teller-clock/Audio-files"  # Change this
 SCHEDULE_FILE = os.path.join(BASE_DIR, "schedule.json")
 FOLDERS = {
     "rythem": os.path.join(BASE_DIR, "Rythem"),

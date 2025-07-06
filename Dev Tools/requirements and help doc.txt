@@ -1,3 +1,4 @@
+--------------------------------
 system Time reset
 1. Check with:
     timedatectl
@@ -11,3 +12,14 @@ system Time reset
     python time-teller-clock-program.py
 6.After testing set true
     sudo timedatectl set-ntp true
+
+-------------------------------------------
+Auto start setup
+crontab -e
+Add the below lines
+@reboot python /home/pi/time-teller-clock/time-teller-clock-program.py &
+
+the below line is to restart at 3.50 AM
+55 3 * * * sudo reboot
+
+
