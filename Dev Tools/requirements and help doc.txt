@@ -1,0 +1,13 @@
+system Time reset
+1. Check with:
+    timedatectl
+2. If it says:
+    NTP service: active
+3. Disable timedatectl
+    sudo timedatectl set-ntp false
+4. set custome time:
+    sudo date -s "2025-07-05 19:44:50"
+5. then run the program
+    python time-teller-clock-program.py
+6.After testing set true
+    sudo timedatectl set-ntp true
