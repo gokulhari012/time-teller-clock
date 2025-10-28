@@ -1,13 +1,26 @@
 [
   {
+    "schedule_name": "mon_tue_mornings",
     "time": "06:05",
     "days": ["monday", "tuesday"],
     "months": ["june", "july"],
-    "custom_song": "GokulHari.mp3"
+    "custom_song": "GokulHari.mp3",
+    "enabled": true
   },
   {
+    "schedule_name": "sunday1",
     "time": "15:30",
     "days": ["sunday"],
-    "months": ["all"]
+    "months": ["all"],
+    "custom_song": "new_folder",
+    "enabled": true
+  },
+  {
+    "schedule_name": "sunday",
+    "time": "15:30",
+    "days": ["sunday"],
+    "months": ["all"],
+    "enabled": true
   }
 ]
+

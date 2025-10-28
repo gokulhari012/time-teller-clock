@@ -21,5 +21,24 @@ Add the below lines
 
 the below line is to restart at 3.50 AM
 55 3 * * * sudo reboot
+-------------------------------------------
+
+Auto start setup 2222
+crontab -e
+Add the below lines
+@reboot sleep 10 && /usr/bin/python3 /home/pi/time-teller-clock/time-teller-clock-program.py >> /home/pi/startup.log 2>&1 &
+
+the below line is to restart at 3.50 AM
+55 3 * * * sudo reboot
+
+Need to run the line
+chmod +x /home/pi/time-teller-clock/time-teller-clock-program.py
+chown pi:pi /home/pi/time-teller-clock/time-teller-clock-program.py
 
 
+Added a short delay sleep 10 (some I2C/LCD need boot delay)
+If your code uses I2C (RTC, LCD), the hardware might not be ready instantly after boot.
+
+For logs
+cat /home/pi/startup.log
+-------------------------------------------

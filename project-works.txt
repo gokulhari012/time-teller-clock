@@ -1,0 +1,21 @@
+1) Display keypad time change -> 
+Menu -> 1) Set Time, Date
+
+2) Monthly selection - > July month 1, august 2 On and off (need option in display)
+
+2) Audio play. in display - rythem, time, date, month, quoetes, name, message. monlthy play -> songs playing
+
+3) custom play la. folder selection -> random song in folder.
+
+4) Every 15 mins - > add happy songs play after quoetes. (need setting to turn ON and OFF)
+
+5) Speaker output -> gpio pin to control Relay. to spaker. shedule On and off. On time and off time. (need setting in display)
+
+6) Fader out rythem audio. Time louder.
+
+7) Volume set for morning from and to. Night from and to.(need setting in display.)
+
+8) Sunday song. -> song number selection. On and OFF. (need setting in display.)
+
+9) After Rythen -> one file need to play. Wishing.mp3
+
