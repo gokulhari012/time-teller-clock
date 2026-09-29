@@ -1,8 +1,10 @@
 # Time Teller Clock
 
-An automatic talking clock for the church. It runs on a Raspberry Pi connected to speakers, and every 15 minutes it plays a short intro tune and a greeting, then speaks the time, date, month and weekday. After that it plays a quote and a song. You can also schedule special songs for chosen times, weekdays and months.
+An automatic talking clock for the church. It runs on a Raspberry Pi connected to speakers. At the times you choose (every 15 minutes by default) it plays a short intro tune and a greeting, then speaks the time, date, month and weekday. After that it plays the church name, a quote, an extra quote and a song. The song can change with the time of day, on Sundays and in chosen months. You can also schedule special songs for chosen times, weekdays and months.
 
 The clock keeps time with a battery-backed RTC (real-time clock) module, so it stays correct without the internet. A 16×2 LCD and a 4-button keypad on the front let you view the time and change settings without a keyboard or monitor.
+
+> **ESP32-C3 version:** the same clock is also available for an ESP32-C3 with an MP3-TF-16P module. It is in [esp32-time-teller-clock/](esp32-time-teller-clock/), with its own [README](esp32-time-teller-clock/README.md) covering wiring and SD card setup. The front-panel behavior described below applies to both versions.
 
 ---
 
@@ -28,7 +30,12 @@ The clock keeps time with a battery-backed RTC (real-time clock) module, so it s
 
 ## Features
 
-- **Quarter-hour announcements.** At every :00, :15, :30 and :45 the clock plays a full announcement sequence (see [below](#how-an-announcement-works)).
+- **Announcements at the times you choose.** In the *Teller Times* menu you pick which quarter-hours have an announcement. By default, every :00, :15, :30 and :45 has one. See [below](#how-an-announcement-works) for what each announcement plays.
+- **Church name and extra quotes.** A church name clip plays before the quote and an extra quote plays after it. You can turn each one on or off from the menu.
+- **Happy songs by time of day.** You choose which announcements end with a happy song. Songs from `happy_songs_morning/` play before noon and songs from `happy_songs_evening/` play after noon.
+- **Sunday songs.** On Sundays, the times you choose play a song from `sunday_songs/` in place of the happy song.
+- **Monthly songs.** In the months you select, a song from `monthly_songs/` replaces the happy or Sunday song.
+- **Sunday Silence.** On Sunday, nothing plays during a time you set, such as the service.
 - **Custom schedules.** In [`schedule.json`](Audio-files/schedule.json) you can set extra play times for chosen weekdays and months. Each one plays a specific song or a random song from a folder.
 - **Battery-backed time.** A PCF8563 RTC module keeps the time. When the Pi has internet at startup, the program copies the network-synced system time into the RTC.
 - **LCD and keypad menu.** You can set the date and time, turn schedules on or off, and change volumes and other options on the device itself.
@@ -54,20 +61,45 @@ Every announcement plays these clips one after another. Each step waits for the 
 | 4 | Spoken date | `Date/` | By name, e.g. `date-29.mp3` |
 | 5 | Spoken month | `Month/` | By name, e.g. `month-september.mp3` |
 | 6 | Spoken weekday | `Day/` | By name, e.g. `day-tuesday.mp3` |
-| 7 | Quote | `Quotes/` | Random `.mp3` |
-| 8a | Custom song (only for a schedule that names an `.mp3` file) | `Custom_songs/` | That exact file |
-| 8b | Custom folder (only for a schedule that names a folder) | `Custom_songs/<folder>/` | Random `.mp3` from that folder |
-| 9 | Happy song | `happy_songs/` | Random `.mp3`. Plays whenever step 8b does not. |
+| 7 | Church name (if *Church Name* is ON) | `church_name/` | Random `.mp3` |
+| 8 | Quote | `Quotes/` | Random `.mp3` |
+| 9 | Extra quote (if *Extra Quotes* is ON) | `extra_quotes/` | Random `.mp3` |
+| 10 | Song for this time | See [Which song plays](#which-song-plays) | Random `.mp3`, or none |
+| 11 | Custom song (schedules with a `custom_song` only) | `Custom_songs/` or `Custom_songs/<folder>/` | That exact file, or a random `.mp3` from the folder |
 
 If a file picked by name (steps 3–6) is missing, that step is skipped silently. If a folder for a random pick is missing, that step is skipped and `Folder not found, skipping` is written to the log. Time files exist only for quarter-hours, so a custom schedule at a time like 06:05 plays without a spoken time.
+
+### Which song plays
+
+Every announcement, including one started by a schedule, plays the song set in the menu for the current quarter-hour. The first rule that applies wins:
+
+1. **Monthly song** (`monthly_songs/`): the current month is ON in *Monthly Songs*, and a happy song or Sunday song is set for this time.
+2. **Sunday song** (`sunday_songs/`): today is Sunday and this time is ON in *Sunday Songs*.
+3. **Happy song**: this time is ON in *Happy Songs*. It comes from `happy_songs_morning/` from 12:00 AM to 11:45 AM, and from `happy_songs_evening/` from 12:00 PM to 11:45 PM.
+4. **No song**: the announcement ends after the quotes.
+
+If the chosen folder has no `.mp3` files, the next rule is tried. For example, with September ON in *Monthly Songs* but an empty `monthly_songs/` folder, the happy song still plays.
+
+For a schedule with a `custom_song`, the custom song (or a random song from that folder) plays **after** this song. For example, `sunday1` on Sunday at 3:30 PM plays the evening happy song and then a song from `new_folder`. A schedule at a time that is not a quarter-hour, such as 06:05, has no song for its time, so only the custom song plays. To give a schedule only its custom song, turn *Happy Songs* (and *Sunday Songs*) OFF at that time.
+
+Examples:
+
+| Time | Happy Songs | Sunday Songs | Month ON in *Monthly Songs* | Song |
+|------|-------------|--------------|-----------------------------|------|
+| Monday 9:00 AM | ON | — | No | `happy_songs_morning/` |
+| Monday 9:00 PM | ON | — | No | `happy_songs_evening/` |
+| Sunday 9:00 AM | ON or OFF | ON | No | `sunday_songs/` |
+| Monday 9:00 AM | ON | — | Yes | `monthly_songs/` |
+| Monday 10:00 AM | OFF | — | Yes | None |
 
 ### When an announcement plays
 
 The main loop wakes up once a minute, at second `00` by the RTC. It then does the following:
 
 1. It refreshes the date and time on the LCD, unless the settings menu is open.
-2. It checks `schedule.json` for an enabled entry that matches the current time (`HH:MM`, 24-hour), weekday and month. **If one matches, it plays the announcement with that entry's custom song or folder**, or the standard announcement if the entry has no `custom_song`. The first matching entry wins.
-3. Otherwise, if the minute is 00, 15, 30 or 45, it plays the standard announcement.
+2. If it is Sunday and the time is inside **Sunday Silence**, nothing plays.
+3. It checks `schedule.json` for an enabled entry that matches the current time (`HH:MM`, 24-hour), weekday and month. **If one matches, it plays the announcement with that entry's custom song or folder.** If the entry has no `custom_song`, it plays the standard announcement. The first matching entry wins, even at times that are OFF in *Teller Times*.
+4. Otherwise, if the current quarter-hour is ON in **Teller Times**, it plays the standard announcement.
 
 ```mermaid
 flowchart TD
@@ -82,10 +114,12 @@ flowchart TD
     H --> I
     I --> J["Wait for next minute, checking test button each second"]
     J --> K["Refresh LCD unless menu is open"]
-    K --> L{"Enabled schedule entry matches now?"}
-    L -- yes --> M["Announcement + custom song or folder"]
-    L -- no --> N{"Minute is 00, 15, 30 or 45?"}
-    N -- yes --> O["Announcement + happy song"]
+    K --> S{"Sunday Silence time?"}
+    S -- yes --> J
+    S -- no --> L{"Enabled schedule entry matches now?"}
+    L -- yes --> M["Announcement + song for this time + the schedule's custom song"]
+    L -- no --> N{"Time ON in Teller Times?"}
+    N -- yes --> O["Announcement + monthly, Sunday or happy song"]
     N -- no --> J
     M --> J
     O --> J
@@ -131,7 +165,7 @@ These parts come from the project requirements and the code:
 
 All pin numbers in the code use **BCM** numbering. The physical header pins are listed here for convenience.
 
-> The inline comments next to the pin definitions in [time-teller-clock-program.py](time-teller-clock-program.py#L21-L24) mention "GPIO17 (pin 11)". Those comments are out of date. The table below matches the code.
+> The inline comments next to the pin definitions in [time-teller-clock-program.py](time-teller-clock-program.py#L22-L25) mention "GPIO17 (pin 11)". Those comments are out of date. The table below matches the code.
 
 | Function | BCM GPIO | Physical pin | Direction | Notes |
 |----------|----------|--------------|-----------|-------|
@@ -175,18 +209,24 @@ time-teller-clock/
 │   ├── Date/                         # 31 files: date-<d>.mp3
 │   ├── Month/                        # 12 files: month-<name>.mp3
 │   ├── Day/                          # 7 files:  day-<name>.mp3
+│   ├── church_name/                  # Church name clips, before the quote (random)
 │   ├── Quotes/                       # Quotes (random)
-│   ├── Custom_songs/                 # Songs for schedules + Testsong.mp3
-│   │   └── <folder>/                 # Optional sub-folders for "random from folder" schedules
-│   └── happy_songs/                  # Songs after each announcement (random)
+│   ├── extra_quotes/                 # Extra quotes, after the quote (random)
+│   ├── happy_songs_morning/          # Happy songs for 12 AM - 12 PM (random)
+│   ├── happy_songs_evening/          # Happy songs for 12 PM - 12 AM (random)
+│   ├── sunday_songs/                 # Sunday songs (random)
+│   ├── monthly_songs/                # Monthly songs (random)
+│   └── Custom_songs/                 # Songs for schedules + Testsong.mp3
+│       └── <folder>/                 # Optional sub-folders for "random from folder" schedules
 ├── Audio-files-acc-format.rar        # Original recordings in AAC format (before MP3 conversion)
+├── esp32-time-teller-clock/          # ESP32-C3 + MP3-TF-16P version (Arduino sketch + SD card script)
 ├── Dev Tools/                        # Hardware test scripts, TTS generators, setup notes
 ├── help.txt                          # How to convert .aac → .mp3 with ffmpeg
 ├── project-works.txt                 # Feature to-do list
 └── Schedule-time-song-requirement.txt# Original requirements and hardware list
 ```
 
-The program expects this layout at a **fixed path**, set in [time-teller-clock-program.py:61](time-teller-clock-program.py#L61):
+The program expects this layout at a **fixed path**, set in [time-teller-clock-program.py:59](time-teller-clock-program.py#L59):
 
 ```python
 BASE_DIR = "/home/pi/time-teller-clock/Audio-files"
@@ -194,7 +234,9 @@ BASE_DIR = "/home/pi/time-teller-clock/Audio-files"
 
 `settings.json` is stored one level above that, at `/home/pi/time-teller-clock/settings.json`.
 
-`Wishing/` and `happy_songs/` each contain a `.gitkeep` placeholder file so that Git keeps the empty folders. Put your `.mp3` files in them; the placeholder is ignored because only `.mp3` files are played.
+Folders that start out empty contain a `.gitkeep` placeholder file so that Git keeps them. Put your `.mp3` files in them; the placeholder is ignored because only `.mp3` files are played. An empty folder is simply skipped.
+
+> **Upgrading from the earlier version:** the old `happy_songs/` folder is no longer used. Move its songs into `happy_songs_morning/` and `happy_songs_evening/`.
 
 ---
 
@@ -211,7 +253,7 @@ The program builds the time, date, month and day filenames from the current RTC 
 | `Month/` | `month-<full month name, lowercase>.mp3` | `month-january.mp3` | 12 |
 | `Day/` | `day-<full weekday name, lowercase>.mp3` | `day-sunday.mp3` | 7 |
 
-For the folders that play a random file (`Rythem`, `Wishing`, `Quotes`, `happy_songs` and custom sub-folders), any filename works. The extension must be lowercase `.mp3`, because the check is case-sensitive and files ending in `.MP3` are ignored.
+For the folders that play a random file (`Rythem`, `Wishing`, `church_name`, `Quotes`, `extra_quotes`, `happy_songs_morning`, `happy_songs_evening`, `sunday_songs`, `monthly_songs` and custom sub-folders), any filename works. The extension must be lowercase `.mp3`, because the check is case-sensitive and files ending in `.MP3` are ignored.
 
 `Custom_songs/Testsong.mp3` is the file played by the test button.
 
@@ -270,31 +312,50 @@ This file is a list of schedule entries:
 Rules:
 
 - Only the **first** enabled entry that matches is used.
-- A matching schedule replaces the normal quarter-hour announcement for that minute. The announcement plays once, followed by the custom song.
-- An entry **without** `custom_song` plays the standard announcement (with a happy song) at its time. Use it to add announcements at times other than the quarter-hours.
+- A matching schedule replaces the normal announcement for that minute. The announcement plays once, followed by the song set for that time (if any) and then the custom song.
+- Schedules play even at times that are OFF in *Teller Times*, but not during *Sunday Silence*. The song set for that time still plays at a schedule, even if *Teller Times* is OFF there.
+- A happy song plus a long custom song can take many minutes. Any announcement time that passes while audio is playing is skipped.
+- An entry **without** `custom_song` plays the standard announcement at its time, with the song set for that time in the menu ([Which song plays](#which-song-plays)). Songs are set per quarter-hour, so at a time like 06:05 there is no song.
 - Toggling a schedule from the LCD rewrites this file right away.
 
 ### `settings.json` — device settings
 
-The program creates this file the first time you leave the settings menu. If it is missing, the defaults below are used. When a key is missing from the file, the default value is added.
+The program creates this file the first time a setting is saved from the menu. If it is missing, the defaults are used. When a key is missing from the file, the default value is added. Example:
 
 ```json
 {
-    "Monthly Songs": {
-        "January": true, "February": true, "March": true, "April": true,
-        "May": true, "June": true, "July": true, "August": true,
-        "September": true, "October": true, "November": true, "December": true
+    "teller_times": ["06:00", "09:00", "12:00", "18:00", "21:00"],
+    "happy_song_times": ["09:00", "21:00"],
+    "sunday_song_times": ["09:00"],
+    "sunday_silence": {"enabled": true, "start": "09:00", "end": "11:00"},
+    "monthly_songs": {
+        "January": false, "February": false, "March": false, "April": false,
+        "May": false, "June": false, "July": false, "August": false,
+        "September": false, "October": false, "November": false, "December": true
     },
-    "Schedule Songs": { "mon_tue_mornings": true, "sunday1": true, "sunday": true },
-    "Sunday Songs": false,
-    "Speaker Output": true,
-    "Morning Volume": 5,
-    "Evening Volume": 5,
-    "Happy Song": true
+    "church_name": true,
+    "extra_quotes": true,
+    "speaker_output": true,
+    "morning_volume": 5,
+    "evening_volume": 5
 }
 ```
 
-The `Schedule Songs` section in `settings.json` is only a copy. Whether a schedule is on or off comes from the `enabled` field in `schedule.json`.
+| Key | Menu item | Meaning | Default |
+|-----|-----------|---------|---------|
+| `teller_times` | Teller Times | Times when the time teller runs | Every 15 minutes |
+| `happy_song_times` | Happy Songs | Times whose announcement ends with a happy song | Every 15 minutes |
+| `sunday_song_times` | Sunday Songs | Times whose Sunday announcement ends with a Sunday song | None |
+| `sunday_silence` | Sunday Silence | ON/OFF, start and end of the Sunday time with nothing played. The end time is not included. | OFF, 09:00–11:00 |
+| `monthly_songs` | Monthly Songs | Months that play monthly songs | All `false` |
+| `church_name` | Church Name | Play `church_name/` before the quote | `true` |
+| `extra_quotes` | Extra Quotes | Play `extra_quotes/` after the quote | `true` |
+| `speaker_output` | Speaker Output | Switch the relay on GPIO 23 while audio plays | `true` |
+| `morning_volume`, `evening_volume` | Morning / Evening Volume | 0–10 | `5` |
+
+All times are `"HH:MM"` in 24-hour format and must be quarter-hours (`:00`, `:15`, `:30` or `:45`), because those are the only times with a spoken-time recording.
+
+**Upgrading from the earlier version:** the speaker and volume values in an old `settings.json` are kept. The old `Monthly Songs`, `Sunday Songs`, `Happy Song` and `Schedule Songs` entries are ignored and removed the next time settings are saved. Schedules are still turned on and off in `schedule.json`.
 
 ---
 
@@ -327,18 +388,64 @@ The test button is checked once a second, and only while no audio is playing.
 
 Hold **SET** to open the menu. Use **LEFT** and **RIGHT** to move through these items (the list wraps around):
 
-| Menu item | Line 2 shows | What SET does | Default | Used by playback? |
-|-----------|--------------|---------------|---------|-------------------|
-| **Date & Time** | `HH:MM dd-mm` | Opens the date and time editor | — | ✅ Yes |
-| **Monthly Songs** | `Tap Set to Open` | Opens a list of months, each ON or OFF | All ON | ⚠️ Saved but not yet applied |
-| **Schedule Songs** | `Tap Set to Open` | Opens a list of schedules, each ON or OFF | From `schedule.json` | ✅ Yes |
-| **Sunday Songs** | `Status: ON/OFF` | Toggles ON/OFF | OFF | ⚠️ Saved but not yet applied |
-| **Speaker Output** | `Status: ON/OFF` | Toggles relay control on GPIO 23 | ON | ✅ Yes |
-| **Morning Volume** | `Value: n` | Adds 1 (after 10 it goes back to 0) | 5 | ✅ Yes |
-| **Evening Volume** | `Value: n` | Adds 1 (after 10 it goes back to 0) | 5 | ✅ Yes |
-| **Happy Song** | `Status: ON/OFF` | Toggles ON/OFF | ON | ⚠️ Saved but not yet applied. Happy songs always play. |
+| Menu item | Line 2 shows | What SET does | Default |
+|-----------|--------------|---------------|---------|
+| **Date & Time** | `HH:MM dd-mm` | Opens the date and time editor | — |
+| **Teller Times** | `Tap Set to Open` | Opens a [time list](#time-lists-teller-times-happy-songs-sunday-songs): when the time teller runs | Every 15 minutes |
+| **Happy Songs** | `Tap Set to Open` | Opens a time list: which announcements end with a happy song | Every 15 minutes |
+| **Sunday Songs** | `Tap Set to Open` | Opens a time list: which Sunday announcements end with a Sunday song | None |
+| **Sunday Silence** | `Tap Set to Open` | Opens [Sunday Silence](#sunday-silence): ON/OFF, start and end time | OFF, 9:00–11:00 AM |
+| **Monthly Songs** | `Tap Set to Open` | Opens the list of months, each ON or OFF | All OFF |
+| **Church Name** | `Status: ON/OFF` | Turns the church name clip ON or OFF | ON |
+| **Extra Quotes** | `Status: ON/OFF` | Turns the extra quote ON or OFF | ON |
+| **Schedule Songs** | `Tap Set to Open` | Opens the list of schedules, each ON or OFF | From `schedule.json` |
+| **Speaker Output** | `Status: ON/OFF` | Turns relay control on GPIO 23 ON or OFF | ON |
+| **Morning Volume** | `Value: n` | Adds 1 (after 10 it goes back to 0) | 5 |
+| **Evening Volume** | `Value: n` | Adds 1 (after 10 it goes back to 0) | 5 |
 
-Press **BACK** to save everything to `settings.json`, apply the Speaker Output setting, show `Settings Saved`, and return to the home screen.
+Press **BACK** to save everything to `settings.json`, apply the Speaker Output setting, show `Settings Saved`, and return to the home screen. The sub-menus also save when you leave them with BACK.
+
+### Time lists: Teller Times, Happy Songs, Sunday Songs
+
+```
+┌────────────────┐
+│> 09:00 AM      │
+│Status: ON      │
+└────────────────┘
+```
+
+The list has one entry for each quarter-hour, from 12:00 AM to 11:45 PM, and opens at the current time.
+
+- Press **LEFT** or **RIGHT** to move 15 minutes. Hold the button for 2 seconds to move an hour at a time.
+- Press **SET** to turn the shown time ON or OFF.
+- Press **BACK** to save and return to the menu (`Setting Saved`).
+- Three shortcuts sit before 12:00 AM. Press LEFT from 12:00 AM to reach them:
+  - **All ON**: every quarter-hour ON.
+  - **All OFF**: every quarter-hour OFF.
+  - **Every hour**: only the :00 times ON.
+
+  Press **SET twice** to apply a shortcut. The first press shows `Set again = OK`; moving away cancels it.
+- A song only plays when the time teller runs. In *Happy Songs* and *Sunday Songs*, `ON (Teller OFF)` means a song is set for that time but *Teller Times* is OFF there, so it only plays if a schedule runs at that time.
+
+For example, to announce every hour from 6 AM to 9 PM: in *Teller Times*, apply **Every hour**, then turn OFF 10:00 PM through 5:00 AM.
+
+### Sunday Silence
+
+```
+┌────────────────┐
+│> Start time    │
+│09:00 AM  +/-   │
+└────────────────┘
+```
+
+On Sundays, nothing plays from the start time up to the end time: no announcements and no schedules. The end time itself is not silenced. With 9:00–11:00 AM, the 9:00 to 10:45 announcements are skipped and 11:00 plays. The test button still works.
+
+- The menu has three items: **Silence** (ON/OFF), **Start time** and **End time**. Press **LEFT** or **RIGHT** to move between them.
+- On *Silence*, press **SET** to turn it ON or OFF.
+- On a time, press **SET** to start changing it (`+/-` appears). Then press **LEFT** or **RIGHT** to change it by 15 minutes, or hold to move an hour at a time. Press **SET** or **BACK** when done.
+- Press **BACK** to save and return to the menu.
+
+If the end time is earlier than the start time, the silence crosses midnight. For example, 10:00 PM to 2:00 AM silences Sunday from midnight to 2 AM and from 10 PM to midnight.
 
 ### Date & Time editor
 
@@ -371,9 +478,8 @@ Notes:
 ```
 
 - Press **LEFT** or **RIGHT** to move between months or schedules, and **SET** to toggle ON/OFF.
-- Press **BACK** to return to the main menu.
-  - *Schedule Songs* saves to `schedule.json` straight away (`Setting Saved`).
-  - *Monthly Songs* changes are saved when you leave the main settings menu with BACK.
+- Press **BACK** to save and return to the main menu (`Setting Saved`).
+- *Monthly Songs* opens at the current month. In a month that is ON, a song from `monthly_songs/` plays in place of the happy or Sunday song, only at times where one of those is set.
 
 ### Status LEDs
 
@@ -393,7 +499,7 @@ Notes:
    sudo apt install -y i2c-tools
    i2cdetect -y 1        # expect 27 (LCD) and 51 (RTC)
    ```
-   If your LCD shows up at another address (often `3f`), change `0x27` in [time-teller-clock-program.py:184](time-teller-clock-program.py#L184).
+   If your LCD shows up at another address (often `3f`), change `0x27` in [time-teller-clock-program.py:199](time-teller-clock-program.py#L199).
 3. **Install the Python packages:**
    ```bash
    sudo apt install -y python3-pip python3-pygame python3-rpi.gpio python3-smbus
@@ -406,7 +512,7 @@ Notes:
    git clone https://github.com/gokulhari012/time-teller-clock.git
    ```
    Then put your audio into the folders as described in [Audio files](#audio-files).
-5. **Choose the audio output.** Pick the headphone jack or USB audio in `raspi-config` → *System Options* → *Audio*, or with `alsamixer`. If pygame produces no sound, try uncommenting `os.environ["SDL_AUDIODRIVER"] = "alsa"` at [line 154](time-teller-clock-program.py#L154).
+5. **Choose the audio output.** Pick the headphone jack or USB audio in `raspi-config` → *System Options* → *Audio*, or with `alsamixer`. If pygame produces no sound, try uncommenting `os.environ["SDL_AUDIODRIVER"] = "alsa"` at [line 169](time-teller-clock-program.py#L169).
 6. **Run it once by hand** to check that everything works:
    ```bash
    python3 /home/pi/time-teller-clock/time-teller-clock-program.py
@@ -459,7 +565,7 @@ When the program starts with internet available, it copies the **system** time i
 
 ### Play an announcement every minute
 
-In the main loop ([lines 875–889](time-teller-clock-program.py#L875-L889)), the comments show a development mode. Replace `elif now.minute % 15 == 0:` with the commented `else:` to hear an announcement every minute. Comment out `wait_for_next_minute()` to skip the wait.
+In the main loop ([lines 1010–1026](time-teller-clock-program.py#L1010-L1026)), the comments show a development mode. Replace `elif is_teller_time(now):` with the commented `else:` to hear an announcement every minute. Comment out `wait_for_next_minute()` to skip the wait.
 
 ### Testing on Windows
 
@@ -483,6 +589,9 @@ The filename helpers (`get_time_filename`, `get_date_filename`) handle the Windo
 | **LCD is blank after boot** | Wait about 70 seconds. Run `i2cdetect -y 1` and look for `27`. Adjust the contrast potentiometer on the LCD backpack. Check `startup.log`. |
 | **No sound** | Check the audio output (`raspi-config` / `alsamixer`) and whether the USB audio adapter is the default device. Make sure Morning or Evening Volume is not 0. If *Speaker Output* is ON, check the relay wiring on GPIO 23. Check that the files exist and are named exactly as in [Naming rules](#naming-rules). Try `SDL_AUDIODRIVER=alsa`. |
 | **Time not spoken, but music plays** | The time file is missing or misnamed, or the schedule is at a time other than :00/:15/:30/:45. |
+| **No announcement at a time you expected** | Check that the time is ON in *Teller Times*. On Sundays, also check *Sunday Silence*. |
+| **Announcement plays but no song after it** | Check that the time is ON in *Happy Songs* (or *Sunday Songs* on Sunday), and that the matching folder has `.mp3` files. A song set for a time that is OFF in *Teller Times* shows `ON (Teller OFF)` and only plays if a schedule runs at that time. |
+| **Monthly song plays instead of the happy song** | That month is ON in *Monthly Songs*. |
 | **A folder schedule plays no song** | Check that the folder named in `custom_song` exists inside `Custom_songs/` and contains `.mp3` files. Look for `Folder not found, skipping` in `startup.log`. |
 | **Wrong time** | Set it in the *Date & Time* menu, or connect to the internet and reboot. If the time is lost after a power cut, replace the RTC coin cell. |
 | **Keypad stops responding** | The keypad thread probably stopped with an error. Check `startup.log`, then reboot or wait for the 3:55 AM reboot. |
@@ -497,12 +606,10 @@ These come from reading the current code. The line numbers refer to [time-teller
 
 | # | Issue | Effect | Suggested fix |
 |---|-------|--------|---------------|
-| 1 | `Monthly Songs`, `Sunday Songs` and `Happy Song` settings | Stored and editable, but playback ignores them. | Check them in `time_teller()` |
-| 2 | After a custom `.mp3` schedule, the `else` branch at [line 824](time-teller-clock-program.py#L824) also plays a random happy song | The custom song is followed by an extra happy song. | Only play happy songs when no custom song or folder was given |
-| 3 | Only `KeyboardInterrupt` is caught in the main block | Any other error stops the program until the next reboot. | Run it as a `systemd` service with `Restart=always`, or catch errors in the loop |
-| 4 | `PCF8563(i2c)` raises an exception when the RTC is missing | The "Failed" LED branch is never reached. The program exits instead. | Wrap `init_RTC()` in `try/except` |
-| 5 | Volume uses `datetime.now()` (the system clock), not the RTC | Without internet, the morning/evening volume switch can happen at the wrong time. | Pass the RTC time into `auto_set_volume` |
-| 6 | The RTC is synced whenever the internet is reachable, without checking that NTP has synced | A wrong system time could be written to the RTC. | Check `timedatectl show -p NTPSynchronized` first |
+| 1 | Only `KeyboardInterrupt` is caught in the main block | Any other error stops the program until the next reboot. | Run it as a `systemd` service with `Restart=always`, or catch errors in the loop |
+| 2 | `PCF8563(i2c)` raises an exception when the RTC is missing | The "Failed" LED branch is never reached. The program exits instead. | Wrap `init_RTC()` in `try/except` |
+| 3 | Volume uses `datetime.now()` (the system clock), not the RTC | Without internet, the morning/evening volume switch can happen at the wrong time. | Pass the RTC time into `auto_set_volume` |
+| 4 | The RTC is synced whenever the internet is reachable, without checking that NTP has synced | A wrong system time could be written to the RTC. | Check `timedatectl show -p NTPSynchronized` first |
 
 ---
 
@@ -517,9 +624,12 @@ This compares the items in [project-works.txt](project-works.txt) and [Schedule-
 | Play wishing clip after the rhythm | ✅ Done (random file from `Wishing/`) |
 | Custom schedules by time, weekday and month | ✅ Done (edit the JSON; enable or disable from the LCD) |
 | Custom play from a folder (random song) | ✅ Done |
-| Happy songs after quotes every 15 min, with an ON/OFF setting | ⚠️ Plays every time; the ON/OFF setting is not applied yet |
-| Monthly ON/OFF selection | ⚠️ Menu done; not applied to playback |
-| Sunday song with song-number selection and ON/OFF | ⚠️ ON/OFF setting only; no song selection or playback yet |
+| Choose the announcement times from the display | ✅ Done (*Teller Times*) |
+| Church name before the quote, extra quote after it, each with ON/OFF | ✅ Done |
+| Happy songs after the quotes, chosen per time, with morning and evening folders | ✅ Done (*Happy Songs*) |
+| Sunday songs at chosen times, in place of the happy song | ✅ Done (*Sunday Songs*; random song from `sunday_songs/`) |
+| No announcements during a chosen time on Sunday | ✅ Done (*Sunday Silence*) |
+| Monthly songs in selected months, in place of happy and Sunday songs | ✅ Done (*Monthly Songs*) |
 | Speaker relay on GPIO | ✅ Relay switches around each clip |
 | Speaker relay on/off **time schedule** | ❌ Not started |
 | Separate morning and night volume | ✅ Done; the 5 AM / 5 PM switch times are fixed in code |

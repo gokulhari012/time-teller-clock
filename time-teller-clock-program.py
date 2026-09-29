@@ -2,6 +2,7 @@ import os
 import time
 import random
 import json
+import copy
 from datetime import datetime
 import pygame
 import platform
@@ -55,9 +56,6 @@ KEYS = [
 editing = False
 speaker_output_required = True
 
-MONTHLY_SONGS="Monthly Songs"
-SCHEDULE_SONGS = "Schedule Songs"
-
 BASE_DIR = "/home/pi/time-teller-clock/Audio-files"  # Change this
 SCHEDULE_FILE = os.path.join(BASE_DIR, "schedule.json")
 
@@ -71,11 +69,22 @@ FOLDERS = {
     "date": os.path.join(BASE_DIR, "Date"),
     "month": os.path.join(BASE_DIR, "Month"),
     "day": os.path.join(BASE_DIR, "Day"),
+    "church_name": os.path.join(BASE_DIR, "church_name"),
     "quotes": os.path.join(BASE_DIR, "Quotes"),
+    "extra_quotes": os.path.join(BASE_DIR, "extra_quotes"),
     "custom_song": os.path.join(BASE_DIR, "Custom_songs"),
-    "happy_songs": os.path.join(BASE_DIR, "happy_songs"),
+    "happy_songs_morning": os.path.join(BASE_DIR, "happy_songs_morning"),  # 12 AM to 12 PM
+    "happy_songs_evening": os.path.join(BASE_DIR, "happy_songs_evening"),  # 12 PM to 12 AM
+    "sunday_songs": os.path.join(BASE_DIR, "sunday_songs"),
+    "monthly_songs": os.path.join(BASE_DIR, "monthly_songs"),
 }
 test_song = "Testsong.mp3"
+
+# Quarter-hour times "00:00", "00:15" ... "23:45". The time teller, happy song and
+# Sunday song times are chosen from these (the Time folder has a file for each one).
+SLOT_TIMES = [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 15, 30, 45)]
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November", "December"]
 
 def save_schedules(data):
     with open(SCHEDULE_FILE, "w") as f:
@@ -91,31 +100,46 @@ print("Loading schedule...")
 schedules = load_schedule()
 schedule_status = {item["schedule_name"]: item["enabled"] for item in schedules}
 
-# monthly_songs = {
-#     "January": True, "February": True, "March": True, "April": True,
-#     "May": True, "June": True, "July": True, "August": True,
-#     "September": True, "October": True, "November": True, "December": True
-# }
+DEFAULT_SETTINGS = {
+    "teller_times": list(SLOT_TIMES),      # when the time teller runs (default: every 15 minutes)
+    "happy_song_times": list(SLOT_TIMES),  # announcements followed by a happy song
+    "sunday_song_times": [],           # announcements followed by a Sunday song (Sundays only)
+    "sunday_silence": {"enabled": False, "start": "09:00", "end": "11:00"},  # no announcements
+    "monthly_songs": {month: False for month in MONTH_NAMES},  # months that play monthly songs
+    "church_name": True,
+    "extra_quotes": True,
+    "speaker_output": True,
+    "morning_volume": 5,
+    "evening_volume": 5,
+}
 
-def load_settings(default_settings):
-    """Load settings from JSON file if it exists, else return defaults."""
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                data = json.load(f)
-                # Merge saved data with defaults (to handle future updates)
-                for key, value in default_settings.items():
-                    if key not in data:
-                        if key == SCHEDULE_SONGS:
-                            data[key] = schedule_status
-                        else:
-                            data[key] = value
-                return data
-        except Exception as e:
-            print("⚠️ Error reading settings:", e)
-            return default_settings
-    else:
-        return default_settings
+# settings.json keys from the previous version that still mean the same thing
+OLD_SETTING_KEYS = {"Speaker Output": "speaker_output",
+                    "Morning Volume": "morning_volume",
+                    "Evening Volume": "evening_volume"}
+
+def load_settings():
+    """Load settings.json on top of the defaults. Keys the program doesn't use are dropped."""
+    loaded = copy.deepcopy(DEFAULT_SETTINGS)
+    if not os.path.exists(SETTINGS_FILE):
+        return loaded
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("⚠️ Error reading settings:", e)
+        return loaded
+    for old_key, new_key in OLD_SETTING_KEYS.items():
+        if old_key in data and new_key not in data:
+            data[new_key] = data[old_key]
+    for key, value in loaded.items():
+        if key not in data:
+            continue
+        if isinstance(value, dict):
+            value.update(data[key])  # keep defaults for any missing entries
+        else:
+            loaded[key] = data[key]
+    return loaded
 
 
 def save_settings(settings):
@@ -127,29 +151,20 @@ def save_settings(settings):
     except Exception as e:
         print("⚠️ Error saving settings:", e)
 
-settings = {
-     MONTHLY_SONGS: {
-        "January": True, "February": True, "March": True, "April": True,
-        "May": True, "June": True, "July": True, "August": True,
-        "September": True, "October": True, "November": True, "December": True
-    },
-    SCHEDULE_SONGS: schedule_status,
-    "Sunday Songs": False,
-    "Speaker Output": True,
-    "Morning Volume": 5,
-    "Evening Volume": 5,
-    "Happy Song": True
-}
-
 print("Loading settings...")
-settings = load_settings(settings)
+settings = load_settings()
 
-
-
-# menu_items = list(settings.keys())
-# menu_items.insert(0, "Date & Time")  # add RTC menu first
-
-menu_items = ["Date & Time"] + list(settings.keys())
+MENU_ITEMS = ["Date & Time", "Teller Times", "Happy Songs", "Sunday Songs", "Sunday Silence",
+              "Monthly Songs", "Church Name", "Extra Quotes", "Schedule Songs",
+              "Speaker Output", "Morning Volume", "Evening Volume"]
+# Menu items that open a list of quarter-hour times, and their settings key
+TIME_LIST_ITEMS = {"Teller Times": "teller_times",
+                   "Happy Songs": "happy_song_times",
+                   "Sunday Songs": "sunday_song_times"}
+# Menu items that SET turns ON/OFF, or steps 0-10
+ON_OFF_ITEMS = {"Church Name": "church_name", "Extra Quotes": "extra_quotes",
+                "Speaker Output": "speaker_output"}
+VOLUME_ITEMS = {"Morning Volume": "morning_volume", "Evening Volume": "evening_volume"}
 
 # os.environ["SDL_AUDIODRIVER"] = "alsa"
 #os.environ["SDL_AUDIODRIVER"] = "pulseaudio"
@@ -168,10 +183,10 @@ def auto_set_volume(settings):
     # Morning: 5 AM to 5 PM
     # Evening: 5 PM to 5 AM
     if 5 <= hour < 17:
-        volume_level = settings["Morning Volume"]
+        volume_level = settings["morning_volume"]
         period = "Morning"
     else:
-        volume_level = settings["Evening Volume"]
+        volume_level = settings["evening_volume"]
         period = "Evening"
 
     # Convert 0-10 range to pygame 0.0-1.0 scale
@@ -510,39 +525,183 @@ def edit_time():
         time.sleep(0.1)
 
 # --------------------------
+# Menu helpers
+# --------------------------
+def lcd_show(line1, line2=""):
+    lcd.clear()
+    lcd.write_string(line1[:16])
+    if line2:
+        lcd.crlf()
+        lcd.write_string(line2[:16])
+
+_held_key = None
+_held_since = 0.0
+
+def key_held_seconds(key):
+    """Seconds the same key has been held down. Call it on every loop with the key just read."""
+    global _held_key, _held_since
+    now = time.time()
+    if key != _held_key:
+        _held_key, _held_since = key, now
+    return now - _held_since
+
+def time_label(hhmm):
+    """'21:15' -> '09:15 PM'"""
+    return datetime.strptime(hhmm, "%H:%M").strftime("%I:%M %p")
+
+def slot_index(hhmm):
+    """'09:15' -> 37, its position in SLOT_TIMES"""
+    hour, minute = map(int, hhmm.split(":"))
+    return (hour * 60 + minute) // 15
+
+# --------------------------
+# Time list submenu (Teller Times, Happy Songs, Sunday Songs)
+# --------------------------
+BULK_ACTIONS = ["All ON", "All OFF", "Every hour"]
+
+def apply_bulk_action(setting_key, action):
+    if action == "All ON":
+        settings[setting_key] = list(SLOT_TIMES)
+    elif action == "All OFF":
+        settings[setting_key] = []
+    else:  # Every hour: only the :00 times
+        settings[setting_key] = [t for t in SLOT_TIMES if t.endswith(":00")]
+
+def time_list_display(setting_key, index, confirm):
+    if index < len(BULK_ACTIONS):
+        lcd_show("> " + BULK_ACTIONS[index], "Set again = OK" if confirm else "Tap Set to apply")
+        return
+    slot = SLOT_TIMES[index - len(BULK_ACTIONS)]
+    on = slot in settings[setting_key]
+    if on and setting_key != "teller_times" and slot not in settings["teller_times"]:
+        status = "ON (Teller OFF)"  # a song only plays when the time teller runs
+    else:
+        status = "Status: " + ("ON" if on else "OFF")
+    lcd_show("> " + time_label(slot), status)
+
+def time_list_menu(setting_key):
+    """Bulk actions, then the 96 quarter-hour times. SET turns the shown time ON/OFF."""
+    entries = len(BULK_ACTIONS) + len(SLOT_TIMES)
+    now = get_RTC_time()
+    index = len(BULK_ACTIONS) + slot_index(now.strftime("%H:%M"))  # start at the current time
+    confirm = False
+    time_list_display(setting_key, index, confirm)
+    time.sleep(0.5)
+    while True:
+        key = read_keypad()
+        held = key_held_seconds(key)
+        if key==RIGHT or key==LEFT:
+            step = 4 if held > 2 else 1  # after 2 s, move an hour at a time
+            index = (index + (step if key == RIGHT else -step)) % entries
+            confirm = False
+            time_list_display(setting_key, index, confirm)
+            time.sleep(0.3)
+        elif key==SET:
+            if index < len(BULK_ACTIONS):
+                if confirm:  # second SET: apply
+                    apply_bulk_action(setting_key, BULK_ACTIONS[index])
+                    lcd_show("Done")
+                    time.sleep(1)
+                confirm = not confirm
+            else:
+                slot = SLOT_TIMES[index - len(BULK_ACTIONS)]
+                if slot in settings[setting_key]:
+                    settings[setting_key].remove(slot)
+                else:
+                    settings[setting_key] = sorted(settings[setting_key] + [slot])
+            time_list_display(setting_key, index, confirm)
+            time.sleep(0.3)
+        elif key==BACK:
+            save_settings(settings)
+            lcd_show("Setting Saved", "Back to Main")
+            time.sleep(1)
+            return
+
+        time.sleep(0.1)
+
+# --------------------------
+# Sunday Silence submenu
+# --------------------------
+def silence_display(index, adjusting):
+    silence = settings["sunday_silence"]
+    if index == 0:
+        lcd_show("> Silence", "Status: " + ("ON" if silence["enabled"] else "OFF"))
+    else:
+        field = "start" if index == 1 else "end"
+        title = "> Start time" if index == 1 else "> End time"
+        lcd_show(title, time_label(silence[field]) + ("  +/-" if adjusting else ""))
+
+def sunday_silence_menu():
+    """ON/OFF, start and end of the Sunday time with no announcements."""
+    silence = settings["sunday_silence"]
+    index = 0  # 0 ON/OFF, 1 start time, 2 end time
+    adjusting = False
+    silence_display(index, adjusting)
+    time.sleep(0.5)
+    while True:
+        key = read_keypad()
+        held = key_held_seconds(key)
+        if key==RIGHT or key==LEFT:
+            direction = 1 if key == RIGHT else -1
+            if adjusting:
+                field = "start" if index == 1 else "end"
+                step = 4 if held > 2 else 1  # after 2 s, move an hour at a time
+                silence[field] = SLOT_TIMES[(slot_index(silence[field]) + direction * step) % len(SLOT_TIMES)]
+            else:
+                index = (index + direction) % 3
+            silence_display(index, adjusting)
+            time.sleep(0.3)
+        elif key==SET:
+            if index == 0:
+                silence["enabled"] = not silence["enabled"]
+            else:
+                adjusting = not adjusting
+            silence_display(index, adjusting)
+            time.sleep(0.3)
+        elif key==BACK:
+            if adjusting:
+                adjusting = False
+                silence_display(index, adjusting)
+                time.sleep(0.3)
+            else:
+                save_settings(settings)
+                lcd_show("Setting Saved", "Back to Main")
+                time.sleep(1)
+                return
+
+        time.sleep(0.1)
+
+# --------------------------
 # Monthly Submenu
 # --------------------------
-def monthly_display(months, index):
-    current_month = months[index]
-    status = "ON" if settings[MONTHLY_SONGS][current_month] else "OFF"
-    lcd.clear()
-    lcd.write_string("> " + current_month[:14])
-    lcd.crlf()
-    lcd.write_string("Status: " + status)
+def monthly_display(index):
+    month = MONTH_NAMES[index]
+    status = "ON" if settings["monthly_songs"][month] else "OFF"
+    lcd_show("> " + month, "Status: " + status)
 
 def monthly_menu():
-    months = list(settings[MONTHLY_SONGS].keys())
-    index = 0
-    monthly_display(months, index)
+    """Months set ON play a song from monthly_songs in place of the happy or Sunday song."""
+    index = get_RTC_time().month - 1  # start at the current month
+    monthly_display(index)
     time.sleep(0.5)
     while True:
         key = read_keypad()
         if key==RIGHT:
-            index = (index + 1) % len(months)
-            monthly_display(months, index)
+            index = (index + 1) % 12
+            monthly_display(index)
             time.sleep(0.3)
         elif key==LEFT:
-            index = (index - 1) % len(months)
-            monthly_display(months, index)
+            index = (index - 1) % 12
+            monthly_display(index)
             time.sleep(0.3)
         elif key==SET:
-            current_month = months[index]
-            settings[MONTHLY_SONGS][current_month] = not settings[MONTHLY_SONGS][current_month]
-            monthly_display(months, index)
+            month = MONTH_NAMES[index]
+            settings["monthly_songs"][month] = not settings["monthly_songs"][month]
+            monthly_display(index)
             time.sleep(0.3)
         elif key==BACK:
-            lcd.clear()
-            lcd.write_string("Back to Main")
+            save_settings(settings)
+            lcd_show("Setting Saved", "Back to Main")
             time.sleep(1)
             return
 
@@ -600,15 +759,21 @@ def scheduled_songs_menu():
 # Settings Menu Function
 # --------------------------
 def settings_display(index):
-    item = menu_items[index]
-    lcd.clear()
-    lcd.write_string("> " + item)
+    item = MENU_ITEMS[index]
+    if item == "Date & Time":
+        value = get_RTC_time().strftime("%H:%M %d-%m")
+    elif item in ON_OFF_ITEMS:
+        value = "Status: " + ("ON" if settings[ON_OFF_ITEMS[item]] else "OFF")
+    elif item in VOLUME_ITEMS:
+        value = "Value: " + str(settings[VOLUME_ITEMS[item]])
+    else:
+        value = "Tap Set to Open"
+    lcd_show("> " + item, value)
 
 def settings_menu():
     global editing
-    
-    lcd.clear()
-    lcd.write_string("Settings Menu")
+
+    lcd_show("Settings Menu")
     time.sleep(1)
     print("Entering Settings Menu...")
 
@@ -617,110 +782,37 @@ def settings_menu():
     editing = True
     settings_display(index)
 
-    now = get_RTC_time()
-    settings_display(index)
-    lcd.crlf()
-    lcd.write_string(now.strftime("%H:%M %d-%m"))
-
-    item = menu_items[index]
     while editing:
-        # Display value or status
-
-        # Button Controls
         key = read_keypad()
-        if key==RIGHT:
-            index = (index + 1) % len(menu_items)
-            item = menu_items[index]
-            if item == "Date & Time":
-                now = get_RTC_time()
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string(now.strftime("%H:%M %d-%m"))
-            elif item == MONTHLY_SONGS:
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            elif item == SCHEDULE_SONGS:
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            else:
-                val = settings[item]
-                settings_display(index)
-                lcd.crlf()
-                if isinstance(val, bool):
-                    lcd.write_string("Status: " + ("ON" if val else "OFF"))
-                else:
-                    lcd.write_string("Value: " + str(val))
-
-            time.sleep(0.3)
-
-        elif key==LEFT:
-            index = (index - 1) % len(menu_items)
-            item = menu_items[index]
-            if item == "Date & Time":
-                now = get_RTC_time()
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string(now.strftime("%H:%M %d-%m"))
-            elif item == MONTHLY_SONGS:
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            elif item == SCHEDULE_SONGS:
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            else:
-                val = settings[item]
-                settings_display(index)
-                lcd.crlf()
-                if isinstance(val, bool):
-                    lcd.write_string("Status: " + ("ON" if val else "OFF"))
-                else:
-                    lcd.write_string("Value: " + str(val))
-
+        if key==RIGHT or key==LEFT:
+            index = (index + (1 if key == RIGHT else -1)) % len(MENU_ITEMS)
+            settings_display(index)
             time.sleep(0.3)
 
         elif key==SET:
-            # Perform action
+            item = MENU_ITEMS[index]
             if item == "Date & Time":
                 edit_time()
-                now = get_RTC_time()
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string(now.strftime("%H:%M %d-%m"))
-                # editing = False
-            elif item == MONTHLY_SONGS:
+                lcd.cursor_mode = "hide"
+            elif item in TIME_LIST_ITEMS:
+                time_list_menu(TIME_LIST_ITEMS[item])
+            elif item == "Sunday Silence":
+                sunday_silence_menu()
+            elif item == "Monthly Songs":
                 monthly_menu()
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            elif item == SCHEDULE_SONGS:
+            elif item == "Schedule Songs":
                 scheduled_songs_menu()
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Tap Set to Open")
-            elif isinstance(settings[item], bool):
-                settings[item] = not settings[item]
-                val = settings[item]
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Status: " + ("ON" if val else "OFF"))
-            else:
-                settings[item] = (settings[item] + 1) % 11  # Example: cycle 0-10
-                val = settings[item]
-                settings_display(index)
-                lcd.crlf()
-                lcd.write_string("Value: " + str(val))
-            # settings_display(index)
+            elif item in ON_OFF_ITEMS:
+                settings[ON_OFF_ITEMS[item]] = not settings[ON_OFF_ITEMS[item]]
+            elif item in VOLUME_ITEMS:
+                settings[VOLUME_ITEMS[item]] = (settings[VOLUME_ITEMS[item]] + 1) % 11  # cycle 0-10
+            settings_display(index)
             time.sleep(0.3)
 
         elif key==BACK:
             save_settings(settings)
             set_speaker_output()
-            lcd.clear()
-            lcd.write_string("Settings Saved")
+            lcd_show("Settings Saved")
             time.sleep(1)
             editing = False
 
@@ -728,7 +820,7 @@ def settings_menu():
 
 def set_speaker_output():
     global speaker_output_required
-    if settings["Speaker Output"]:
+    if settings["speaker_output"]:
         speaker_output_required = True
         #GPIO.output(output_pin_speaker, GPIO.HIGH)
         print("Speaker Output Enabled")
@@ -805,6 +897,43 @@ def get_day_filename(now):
     day_file = "day-" + now.strftime("%A").lower() + ".mp3"
     return day_file
 
+def has_mp3(folder):
+    return os.path.isdir(folder) and any(f.endswith('.mp3') for f in os.listdir(folder))
+
+def choose_song_folder(now):
+    """Folder of the song after the announcement: monthly song, else Sunday song, else happy song.
+    Songs are set per quarter-hour. A folder with no .mp3 files is skipped and the next one is used."""
+    slot = now.strftime("%H:%M")
+    happy = slot in settings["happy_song_times"]
+    sunday = now.weekday() == 6 and slot in settings["sunday_song_times"]
+    monthly = (happy or sunday) and settings["monthly_songs"].get(now.strftime("%B"), False)
+    candidates = []
+    if monthly:
+        candidates.append(FOLDERS['monthly_songs'])
+    if sunday:
+        candidates.append(FOLDERS['sunday_songs'])
+    if happy:
+        candidates.append(FOLDERS['happy_songs_morning'] if now.hour < 12 else FOLDERS['happy_songs_evening'])
+    for folder in candidates:
+        if has_mp3(folder):
+            return folder
+    return None
+
+def is_teller_time(now):
+    return now.strftime("%H:%M") in settings["teller_times"]
+
+def in_sunday_silence(now):
+    """True on Sunday between the Sunday Silence start and end times (end not included)."""
+    silence = settings["sunday_silence"]
+    if not silence["enabled"] or now.weekday() != 6:
+        return False
+    minute_of_day = now.hour * 60 + now.minute
+    start = slot_index(silence["start"]) * 15
+    end = slot_index(silence["end"]) * 15
+    if start <= end:
+        return start <= minute_of_day < end
+    return minute_of_day >= start or minute_of_day < end  # a time that crosses midnight
+
 def time_teller(now,custom_song=None, custom_folder=None):
     print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Playing time teller audio...")
 
@@ -814,15 +943,22 @@ def time_teller(now,custom_song=None, custom_folder=None):
     play_exact_file(FOLDERS['date'], get_date_filename(now))
     play_exact_file(FOLDERS['month'], get_month_filename(now))
     play_exact_file(FOLDERS['day'], get_day_filename(now))
+    if settings["church_name"]:
+        play_random_from(FOLDERS['church_name'])
     play_random_from(FOLDERS['quotes'])
+    if settings["extra_quotes"]:
+        play_random_from(FOLDERS['extra_quotes'])
+
+    song_folder = choose_song_folder(now)
+    if song_folder:
+        play_random_from(song_folder)
+
     if custom_song:
         lcd_display_song(custom_song)
         play_exact_file(FOLDERS['custom_song'],custom_song)
-    if custom_folder:
+    elif custom_folder:
         lcd_display_song(custom_folder)
         play_random_from(os.path.join(FOLDERS['custom_song'],custom_folder))
-    else:
-        play_random_from(FOLDERS['happy_songs'])
 
 def should_play_custom(now, schedule):
     current_time = now.strftime("%H:%M")
@@ -877,14 +1013,17 @@ if __name__ == "__main__":
                 if not editing:
                     lcd_display(now)
                 song_name = should_play_custom(now, schedules)
-                if song_name:
+                if in_sunday_silence(now):
+                    if song_name or is_teller_time(now):
+                        print("Sunday Silence time, nothing played")
+                elif song_name:
                     if song_name==True:
                         time_teller(now)
                     elif song_name.endswith('.mp3'):
                         time_teller(now,custom_song=song_name)
                     else:
                         time_teller(now,custom_folder=song_name)
-                elif now.minute % 15 == 0:
+                elif is_teller_time(now):
                 # else: # development
                     time_teller(now)
                 time.sleep(1)
