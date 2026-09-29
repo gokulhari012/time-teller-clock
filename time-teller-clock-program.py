@@ -358,7 +358,7 @@ def edit_time():
                     if value != previous_value:
                         previous_value = value
                         max_day = monthrange(year, month)[1]
-                        new_day = (day % max_day) + value
+                        new_day = (day - 1 + value) % max_day + 1  # wrap within 1..max_day
                         dt = dt.replace(day=new_day)
                         show_time(dt, pos)
                     time.sleep(0.1)
@@ -385,7 +385,7 @@ def edit_time():
                         time.sleep(0.3)
                     if value != previous_value:
                         previous_value = value
-                        new_month = (month % 12) + value
+                        new_month = (month - 1 + value) % 12 + 1  # wrap within 1..12
                         # Adjust day if current day > new month's max days
                         max_day = monthrange(year, new_month)[1]
                         new_day = min(day, max_day)
@@ -416,7 +416,9 @@ def edit_time():
                         time.sleep(0.3)
                     if value != previous_value:
                         previous_value = value
-                        dt = dt.replace(year=year + value)
+                        # Adjust day if 29-Feb lands on a non-leap year
+                        max_day = monthrange(year + value, month)[1]
+                        dt = dt.replace(year=year + value, day=min(day, max_day))
                         show_time(dt, pos)
                     time.sleep(0.1)
 
@@ -761,6 +763,9 @@ def play_audio(file_path):
             GPIO.output(output_pin_speaker, GPIO.LOW)
 
 def play_random_from(folder):
+    if not os.path.isdir(folder):
+        print(f"⚠️ Folder not found, skipping: {folder}")
+        return
     files = [f for f in os.listdir(folder) if f.endswith('.mp3')]
     if files:
         filepath = os.path.join(folder, random.choice(files))
@@ -815,7 +820,7 @@ def time_teller(now,custom_song=None, custom_folder=None):
         play_exact_file(FOLDERS['custom_song'],custom_song)
     if custom_folder:
         lcd_display_song(custom_folder)
-        play_random_from(os.join.path(FOLDERS['custom_song'],custom_folder))
+        play_random_from(os.path.join(FOLDERS['custom_song'],custom_folder))
     else:
         play_random_from(FOLDERS['happy_songs'])
 
@@ -831,8 +836,8 @@ def should_play_custom(now, schedule):
                     if "all" in entry["months"] or current_month.lower() in entry["months"]:
                         if "custom_song" in entry:
                             return entry["custom_song"]
-                        else: 
-                            True
+                        else:
+                            return True
     return False
 
 def wait_for_next_minute():
