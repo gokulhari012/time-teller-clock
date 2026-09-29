@@ -4,12 +4,16 @@
  * Port of time-teller-clock-program.py (Raspberry Pi) to an ESP32-C3 with an
  * MP3-TF-16P (DFPlayer Mini compatible) MP3 module.
  *
- * At the times chosen in the "Teller Times" menu, and at the times listed in
- * SCHEDULES below, it plays:
+ * At the times chosen in the "Teller Times" menu, and at the times of the
+ * schedules, it plays:
  *   rhythm -> wishing -> time -> date -> month -> day -> church name -> quote
  *   -> extra quote -> song
- * The song is a monthly, Sunday or happy song as set in the LCD menu; a
- * schedule's custom song plays after it.
+ * The song is a monthly, Sunday or happy song as set in the menu; a schedule's
+ * custom song plays after it.
+ *
+ * Settings can be changed on the LCD, or on a phone: the clock makes its own
+ * Wi-Fi hotspot (HOTSPOT_NAME below) and serves a settings page at
+ * http://192.168.4.1 (see web_settings.ino and web_page.h in this folder).
  *
  * The MP3 module can only play files by NUMBER (for example 03/025.mp3), so the
  * SD card must use the numbered layout made by prepare_sd_card.py.
@@ -26,6 +30,7 @@
 
 #include <Wire.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include <Preferences.h>
 #include <time.h>
 #include <LiquidCrystal_I2C.h>
@@ -36,9 +41,17 @@
 // CONFIG
 // ============================================================
 
-// ---- Wi-Fi time sync (optional) ----
-// At startup the clock copies internet time into the RTC, like the Pi version.
-// Leave WIFI_SSID empty to skip this and use only the RTC.
+// ---- Phone settings page ----
+// The clock makes its own Wi-Fi hotspot. Connect a phone to it and open
+// http://192.168.4.1 to change the settings. Both passwords need 8+ characters.
+const char* HOTSPOT_NAME     = "TimeTeller";
+const char* HOTSPOT_PASSWORD = "12345678";  // Wi-Fi password of the hotspot
+const char* WEB_PASSWORD     = "12345678";  // password asked by the settings page
+
+// ---- Internet time (optional) ----
+// If the church has Wi-Fi with internet, the clock can join it at startup,
+// copy the internet time into the RTC, and then start its hotspot.
+// Leave WIFI_SSID empty to skip this (set the time from the phone instead).
 const char* WIFI_SSID     = "";
 const char* WIFI_PASSWORD = "";
 const char* TIME_ZONE     = "IST-5:30";  // POSIX TZ string. India = "IST-5:30"
@@ -91,7 +104,7 @@ const uint8_t FOLDER_SUNDAY_SONGS  = 12;  // random file
 const uint8_t FOLDER_MONTHLY_SONGS = 13;  // random file
 const uint8_t FOLDER_CUSTOM        = 14;  // Custom_songs/*.mp3 (SONG_TRACK schedules)
 const uint8_t FOLDER_TEST          = 15;  // 001.mp3 = Testsong.mp3
-// Folders 20-99 = Custom_songs sub-folders (SONG_FOLDER schedules)
+const uint8_t FOLDER_FIRST_CUSTOM  = 20;  // folders 20-99 = Custom_songs sub-folders (SONG_FOLDER schedules)
 
 // The clock asks the MP3 module how many files each random folder holds.
 // If your module can't answer (startup lists a folder under "No files in"
@@ -102,17 +115,21 @@ const uint8_t MANUAL_FOLDER_COUNTS[][2] = {
 };
 
 // ---- Custom schedules (replaces schedule.json) ----
+// Schedules are added, changed and deleted on the phone settings page and
+// saved in the ESP32's flash. DEFAULT_SCHEDULES below are used on first boot.
 enum SongType : uint8_t { SONG_NONE, SONG_TRACK, SONG_FOLDER };
 
+const uint8_t MAX_SCHEDULES = 20;
+
 struct Schedule {
-  const char* name;       // shown in the Schedule Songs menu (14 characters fit)
+  char name[17];          // shown in the Schedule Songs menu (the first 14 characters fit)
   uint8_t hour;           // 0-23
   uint8_t minute;         // 0-59
   uint8_t days;           // DAY_* flags joined with |, or ALL_DAYS
   uint16_t months;        // MONTH_* flags joined with |, or ALL_MONTHS
   SongType songType;      // SONG_NONE = announcement + the song set for that time in the menu
   uint8_t songNumber;     // SONG_TRACK: file number in folder 14. SONG_FOLDER: folder number 20-99
-  bool enabledByDefault;  // first-boot value; after that it is changed from the LCD
+  bool enabled;           // turned ON/OFF on the LCD or the phone
 };
 
 constexpr uint8_t DAY_SUN = 1 << 0, DAY_MON = 1 << 1, DAY_TUE = 1 << 2, DAY_WED = 1 << 3,
@@ -124,16 +141,13 @@ constexpr uint16_t MONTH_JAN = 1 << 0, MONTH_FEB = 1 << 1, MONTH_MAR = 1 << 2, M
 
 // The first enabled schedule that matches the current minute is played, even at
 // times not chosen in Teller Times (but not during Sunday Silence).
-// Add new schedules at the END of the list: the ON/OFF choices made on the LCD
-// are saved by position.
-const Schedule SCHEDULES[] = {
+const Schedule DEFAULT_SCHEDULES[] = {
   // name               hh  mm  days               months                 song         no  enabled
   { "mon_tue_mornings",  6,  5, DAY_MON | DAY_TUE, MONTH_JUN | MONTH_JUL, SONG_TRACK,   1, true },  // Custom_songs/GokulHari.mp3 -> 14/001.mp3
   { "sunday1",          15, 30, DAY_SUN,           ALL_MONTHS,            SONG_FOLDER, 20, true },  // Custom_songs/new_folder/   -> 20/
   { "sunday",           15, 30, DAY_SUN,           ALL_MONTHS,            SONG_NONE,    0, true },
 };
-const uint8_t SCHEDULE_COUNT = sizeof(SCHEDULES) / sizeof(SCHEDULES[0]);
-static_assert(sizeof(SCHEDULES) / sizeof(SCHEDULES[0]) <= 32, "At most 32 schedules are supported");
+static_assert(sizeof(DEFAULT_SCHEDULES) / sizeof(DEFAULT_SCHEDULES[0]) <= MAX_SCHEDULES, "Too many default schedules");
 
 // ---- Timing ----
 const uint32_t DEBOUNCE_MS           = 30;
@@ -142,6 +156,7 @@ const uint32_t REPEAT_DELAY_MS       = 500;   // LEFT/RIGHT start repeating afte
 const uint32_t REPEAT_RATE_MS        = 200;
 const uint32_t FAST_SCROLL_MS        = 2000;  // after this, time lists move an hour per step
 const uint32_t MESSAGE_MS            = 1000;  // "Settings Saved" etc.
+const uint32_t INFO_MESSAGE_MS       = 5000;  // hotspot name and password
 const uint32_t RELAY_ON_DELAY_MS     = 500;   // let the amplifier power up
 const uint32_t CLIP_START_TIMEOUT_MS = 2000;  // BUSY never went LOW = file missing
 const uint32_t CLIP_END_MS           = 300;   // BUSY HIGH this long = clip finished
@@ -191,13 +206,13 @@ enum Screen : uint8_t {
 enum MenuItem : uint8_t {
   MENU_DATE_TIME, MENU_TELLER_TIMES, MENU_HAPPY_SONGS, MENU_SUNDAY_SONGS, MENU_SUNDAY_SILENCE,
   MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES, MENU_SCHEDULES, MENU_SPEAKER,
-  MENU_MORNING_VOLUME, MENU_EVENING_VOLUME, MENU_COUNT
+  MENU_MORNING_VOLUME, MENU_EVENING_VOLUME, MENU_PHONE, MENU_COUNT
 };
 
 const char* const MENU_NAMES[MENU_COUNT] = {
   "Date & Time", "Teller Times", "Happy Songs", "Sunday Songs", "Sunday Silence",
   "Monthly Songs", "Church Name", "Extra Quotes", "Schedule Songs", "Speaker Output",
-  "Morning Volume", "Evening Volume"
+  "Morning Volume", "Evening Volume", "Phone Settings"
 };
 const char* const MONTH_NAMES[12] = {
   "January", "February", "March", "April", "May", "June",
@@ -217,10 +232,11 @@ struct Settings {
   uint16_t monthlySongs;  // months that play monthly songs, bit 0 = January
   bool churchName;        // play church_name before the quote
   bool extraQuotes;       // play extra_quotes after the quote
-  uint32_t scheduleOn;    // one bit per entry in SCHEDULES
   bool speakerOutput;
-  uint8_t morningVolume;  // 0-10, used 05:00-16:59
-  uint8_t eveningVolume;  // 0-10, used 17:00-04:59
+  uint8_t morningVolume;  // 0-10, used from morningFrom until eveningFrom
+  uint8_t eveningVolume;  // 0-10, used from eveningFrom until morningFrom
+  uint8_t morningFrom;    // quarter-hour slot, default 5:00 AM (phone page only)
+  uint8_t eveningFrom;    // quarter-hour slot, default 5:00 PM (phone page only)
 };
 
 struct Clip {
@@ -240,6 +256,9 @@ RTC_PCF8563 rtc;
 DFRobotDFPlayerMini mp3;
 Preferences prefs;
 Settings settings;
+Schedule schedules[MAX_SCHEDULES];
+uint8_t scheduleCount = 0;
+char hotspotIp[16] = "192.168.4.1";  // replaced by the real address when the hotspot starts
 
 // Clock
 DateTime rtcNow;
@@ -273,7 +292,10 @@ uint8_t playlistPos = 0;
 PlayerState playerState = PLAYER_IDLE;
 uint32_t playerTimer = 0;
 const char* playingLabel = nullptr;
+bool mp3Ok = false;
 uint8_t folderCounts[100] = { 0 };
+bool folderCounted[100] = { false };  // folders whose files have been counted
+bool folderCountPending = false;      // count new schedule folders once nothing is playing
 
 StatusLed statusLed = STATUS_OFF;
 
@@ -323,11 +345,6 @@ void loadSlots(const char* key, SlotSet& set, BulkAction firstBoot) {
 }
 
 void loadSettings() {
-  uint32_t defaultSchedules = 0;
-  for (uint8_t i = 0; i < SCHEDULE_COUNT; i++) {
-    if (SCHEDULES[i].enabledByDefault) defaultSchedules |= 1UL << i;
-  }
-
   prefs.begin("timeteller", false);
   loadSlots("tellerSlots", settings.tellerTimes, BULK_ALL_ON);  // every 15 minutes, as before
   loadSlots("happySlots", settings.happyTimes, BULK_ALL_ON);
@@ -341,12 +358,8 @@ void loadSettings() {
   settings.speakerOutput = prefs.getBool("speaker", true);
   settings.morningVolume = prefs.getUChar("volMorning", 5);
   settings.eveningVolume = prefs.getUChar("volEvening", 5);
-
-  // Schedules added since the last save get their enabledByDefault value
-  uint8_t savedCount = prefs.getUChar("schedCount", 0);
-  uint32_t saved = prefs.getULong("schedules", 0);
-  uint32_t savedMask = savedCount >= 32 ? 0xFFFFFFFFUL : ((1UL << savedCount) - 1);
-  settings.scheduleOn = (saved & savedMask) | (defaultSchedules & ~savedMask);
+  settings.morningFrom   = prefs.getUChar("volMornFrom", 20) % SLOT_COUNT;  // 5:00 AM
+  settings.eveningFrom   = prefs.getUChar("volEveFrom", 68) % SLOT_COUNT;   // 5:00 PM
   prefs.end();
 }
 
@@ -364,14 +377,43 @@ void saveSettings() {
   prefs.putBool("speaker", settings.speakerOutput);
   prefs.putUChar("volMorning", settings.morningVolume);
   prefs.putUChar("volEvening", settings.eveningVolume);
-  prefs.putULong("schedules", settings.scheduleOn);
-  prefs.putUChar("schedCount", SCHEDULE_COUNT);
+  prefs.putUChar("volMornFrom", settings.morningFrom);
+  prefs.putUChar("volEveFrom", settings.eveningFrom);
   prefs.end();
   Serial.println("Settings saved.");
 }
 
-bool isScheduleOn(uint8_t index) {
-  return settings.scheduleOn & (1UL << index);
+// The schedule list is saved as one block
+struct ScheduleStore {
+  uint8_t count;
+  Schedule items[MAX_SCHEDULES];
+};
+
+void loadSchedules() {
+  ScheduleStore store;
+  prefs.begin("timeteller", false);
+  bool saved = prefs.isKey("schedList") && prefs.getBytesLength("schedList") == sizeof(store);
+  if (saved) prefs.getBytes("schedList", &store, sizeof(store));
+  prefs.end();
+
+  if (saved && store.count <= MAX_SCHEDULES) {
+    scheduleCount = store.count;
+    memcpy(schedules, store.items, sizeof(store.items));
+  } else {
+    scheduleCount = sizeof(DEFAULT_SCHEDULES) / sizeof(DEFAULT_SCHEDULES[0]);
+    memcpy(schedules, DEFAULT_SCHEDULES, sizeof(DEFAULT_SCHEDULES));
+  }
+  for (Schedule& s : schedules) s.name[sizeof(s.name) - 1] = '\0';
+}
+
+void saveSchedules() {
+  ScheduleStore store = {};
+  store.count = scheduleCount;
+  memcpy(store.items, schedules, sizeof(Schedule) * scheduleCount);
+  prefs.begin("timeteller", false);
+  prefs.putBytes("schedList", &store, sizeof(store));
+  prefs.end();
+  Serial.println("Schedules saved.");
 }
 
 // ============================================================
@@ -487,34 +529,46 @@ int queryFolderCount(uint8_t folder) {
   return count;
 }
 
-void loadFolderCounts() {
-  uint8_t folders[20];
-  uint8_t folderTotal = 0;
+void countFolder(uint8_t folder) {
+  int count = queryFolderCount(folder);
+  Serial.printf("Folder %02d: %d files\n", folder, count);
+  folderCounts[folder] = count < 0 ? 0 : (count > 255 ? 255 : count);
+  folderCounted[folder] = true;
+}
+
+// Song folders used by schedules that have not been counted yet
+void countScheduleFolders() {
+  for (uint8_t i = 0; i < scheduleCount; i++) {
+    const Schedule& s = schedules[i];
+    if (s.songType == SONG_FOLDER && s.songNumber > 0 && s.songNumber < 100 && !folderCounted[s.songNumber]) {
+      countFolder(s.songNumber);
+    }
+  }
+  folderCountPending = false;
+}
+
+// Counts the files in every folder that is played at random
+void countAllFolders() {
   const uint8_t randomFolders[] = {
     FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_CHURCH_NAME, FOLDER_QUOTES, FOLDER_EXTRA_QUOTES,
     FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
   };
-  for (uint8_t folder : randomFolders) folders[folderTotal++] = folder;
-  for (const Schedule& s : SCHEDULES) {
-    bool listed = false;
-    for (uint8_t i = 0; i < folderTotal; i++) listed |= folders[i] == s.songNumber;
-    if (s.songType == SONG_FOLDER && s.songNumber > 0 && s.songNumber < 100 && !listed && folderTotal < 20) {
-      folders[folderTotal++] = s.songNumber;
-    }
-  }
+  memset(folderCounts, 0, sizeof(folderCounts));
+  memset(folderCounted, 0, sizeof(folderCounted));
+  for (uint8_t folder : randomFolders) countFolder(folder);
+  countScheduleFolders();
+}
 
+// Startup: count the files, then list the empty folders on the LCD
+void loadFolderCounts() {
+  countAllFolders();
   char emptyList[17] = "";
   uint8_t emptyTotal = 0;
-  for (uint8_t i = 0; i < folderTotal; i++) {
-    uint8_t folder = folders[i];
-    int count = queryFolderCount(folder);
-    Serial.printf("Folder %02d: %d files\n", folder, count);
-    folderCounts[folder] = count < 0 ? 0 : (count > 255 ? 255 : count);
-    if (folderCounts[folder] == 0) {
-      emptyTotal++;
-      size_t used = strlen(emptyList);
-      if (used + 3 <= 16) snprintf(emptyList + used, sizeof(emptyList) - used, "%02d ", folder);
-    }
+  for (uint8_t folder = 1; folder < 100; folder++) {
+    if (!folderCounted[folder] || folderCounts[folder] > 0) continue;
+    emptyTotal++;
+    size_t used = strlen(emptyList);
+    if (used + 3 <= 16) snprintf(emptyList + used, sizeof(emptyList) - used, "%02d ", folder);
   }
   if (emptyTotal > 0) {
     // Empty folders are skipped when playing; this just makes it visible
@@ -531,9 +585,12 @@ bool isPlayerIdle() {
 }
 
 uint8_t currentVolumeSetting() {
-  // Morning: 5 AM to 5 PM, Evening: 5 PM to 5 AM
-  uint8_t hour = rtcNow.hour();
-  return (hour >= 5 && hour < 17) ? settings.morningVolume : settings.eveningVolume;
+  // Morning volume from morningFrom until eveningFrom (default 5 AM to 5 PM), else evening volume
+  uint8_t slot = slotOf(rtcNow);
+  bool morning = settings.morningFrom <= settings.eveningFrom
+                     ? (slot >= settings.morningFrom && slot < settings.eveningFrom)
+                     : (slot >= settings.morningFrom || slot < settings.eveningFrom);
+  return morning ? settings.morningVolume : settings.eveningVolume;
 }
 
 void playlistClear() {
@@ -575,6 +632,13 @@ void finishPlaylist() {
     playingLabel = nullptr;
     if (screen == SCREEN_HOME) drawHome();
   }
+}
+
+void stopPlayback() {
+  if (isPlayerIdle()) return;
+  mp3.stop();
+  finishPlaylist();
+  Serial.println("Playback stopped");
 }
 
 void nextClip() {
@@ -685,7 +749,7 @@ void playAnnouncement(const DateTime& t, int scheduleIndex) {
     Serial.printf("Song from folder %02d\n", songFolder);
     playlistAddRandom(songFolder, nullptr);
   }
-  const Schedule* s = scheduleIndex >= 0 ? &SCHEDULES[scheduleIndex] : nullptr;
+  const Schedule* s = scheduleIndex >= 0 ? &schedules[scheduleIndex] : nullptr;
   if (s && s->songType == SONG_TRACK) {
     playlistAdd(FOLDER_CUSTOM, s->songNumber, s->name);
   } else if (s && s->songType == SONG_FOLDER) {
@@ -703,9 +767,9 @@ void playTestSong() {
 }
 
 int findSchedule(const DateTime& t) {
-  for (uint8_t i = 0; i < SCHEDULE_COUNT; i++) {
-    const Schedule& s = SCHEDULES[i];
-    if (!isScheduleOn(i)) continue;
+  for (uint8_t i = 0; i < scheduleCount; i++) {
+    const Schedule& s = schedules[i];
+    if (!s.enabled) continue;
     if (s.hour != t.hour() || s.minute != t.minute()) continue;
     if (!(s.days & (1 << t.dayOfTheWeek()))) continue;
     if (!(s.months & (1 << (t.month() - 1)))) continue;
@@ -802,6 +866,9 @@ void drawMenu() {
     case MENU_EVENING_VOLUME:
       snprintf(line1, sizeof(line1), "Value: %d", settings.eveningVolume);
       break;
+    case MENU_PHONE:
+      snprintf(line1, sizeof(line1), "%s", hotspotIp);
+      break;
     default:  // items that open a sub-menu
       snprintf(line1, sizeof(line1), "Tap Set to Open");
       break;
@@ -854,8 +921,8 @@ void drawMonthly() {
 
 void drawSchedules() {
   char line0[17], line1[17];
-  snprintf(line0, sizeof(line0), "> %.14s", SCHEDULES[subIndex].name);
-  snprintf(line1, sizeof(line1), "Status: %s", isScheduleOn(subIndex) ? "ON" : "OFF");
+  snprintf(line0, sizeof(line0), "> %.14s", schedules[subIndex].name);
+  snprintf(line1, sizeof(line1), "Status: %s", schedules[subIndex].enabled ? "ON" : "OFF");
   lcdPrintLine(0, line0);
   lcdPrintLine(1, line1);
 }
@@ -888,14 +955,18 @@ void enterScreen(Screen next) {
   }
 }
 
-// Show a two-line message for MESSAGE_MS, then go to the next screen
-void showMessage(const char* line0, const char* line1, Screen next) {
+// Show a two-line message for a while, then go to the next screen
+void showMessageFor(const char* line0, const char* line1, Screen next, uint32_t ms) {
   lcd.noBlink();
   lcdPrintLine(0, line0);
   lcdPrintLine(1, line1);
   screen = SCREEN_MESSAGE;
   messageNext = next;
-  messageUntil = millis() + MESSAGE_MS;
+  messageUntil = millis() + ms;
+}
+
+void showMessage(const char* line0, const char* line1, Screen next) {
+  showMessageFor(line0, line1, next, MESSAGE_MS);
 }
 
 void updateMessage() {
@@ -987,13 +1058,20 @@ void handleMenuEvent(InputEvent ev) {
           enterScreen(SCREEN_MONTHLY);
           return;
         case MENU_SCHEDULES:
-          if (SCHEDULE_COUNT == 0) {
+          if (scheduleCount == 0) {
             showMessage("No schedules", "", SCREEN_MENU);
           } else {
             subIndex = 0;
             enterScreen(SCREEN_SCHEDULES);
           }
           return;
+        case MENU_PHONE: {
+          char line0[17], line1[17];
+          snprintf(line0, sizeof(line0), "WiFi %s", HOTSPOT_NAME);
+          snprintf(line1, sizeof(line1), "Pass %s", HOTSPOT_PASSWORD);
+          showMessageFor(line0, line1, SCREEN_MENU, INFO_MESSAGE_MS);
+          return;
+        }
         case MENU_CHURCH_NAME:    settings.churchName = !settings.churchName; break;
         case MENU_EXTRA_QUOTES:   settings.extraQuotes = !settings.extraQuotes; break;
         case MENU_SPEAKER:        settings.speakerOutput = !settings.speakerOutput; break;
@@ -1100,11 +1178,11 @@ void handleMonthlyEvent(InputEvent ev) {
 
 void handleSchedulesEvent(InputEvent ev) {
   switch (ev) {
-    case EV_RIGHT: subIndex = (subIndex + 1) % SCHEDULE_COUNT; break;
-    case EV_LEFT:  subIndex = (subIndex + SCHEDULE_COUNT - 1) % SCHEDULE_COUNT; break;
-    case EV_SET:   settings.scheduleOn ^= (1UL << subIndex); break;
+    case EV_RIGHT: subIndex = (subIndex + 1) % scheduleCount; break;
+    case EV_LEFT:  subIndex = (subIndex + scheduleCount - 1) % scheduleCount; break;
+    case EV_SET:   schedules[subIndex].enabled = !schedules[subIndex].enabled; break;
     case EV_BACK:
-      saveSettings();
+      saveSchedules();
       showMessage("Setting Saved", "Back to Main", SCREEN_MENU);
       return;
     default:
@@ -1181,6 +1259,7 @@ void setup() {
 
   Serial.println("Loading settings...");
   loadSettings();
+  loadSchedules();
 
   Serial.println("Initing RTC...");
   if (!rtc.begin(&Wire)) {
@@ -1204,7 +1283,6 @@ void setup() {
   lcdPrintLine(1, "MP3 module...");
   Serial1.begin(9600, SERIAL_8N1, PIN_MP3_RX, PIN_MP3_TX);
   delay(1000);  // the module needs about a second to read the SD card after power-up
-  bool mp3Ok = false;
   for (uint8_t attempt = 0; attempt < 3 && !mp3Ok; attempt++) {
     mp3Ok = mp3.begin(Serial1, MP3_USE_ACK, true);
   }
@@ -1225,6 +1303,8 @@ void setup() {
     delay(3000);
   }
 
+  startWebSettings();  // phone settings page (web_settings.ino)
+
   rtcNow = rtc.now();
   lastMinute = rtcNow.minute();  // wait for the next minute, like the Pi version
   statusLed = mp3Ok ? STATUS_ON : STATUS_BLINK;
@@ -1239,5 +1319,7 @@ void loop() {
   updatePlayer();
   updateMessage();
   updateStatusLed();
+  webLoop();
+  if (folderCountPending && mp3Ok && isPlayerIdle()) countScheduleFolders();
   delay(5);
 }
