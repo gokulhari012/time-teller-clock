@@ -31,6 +31,8 @@ GPIO.setup(input_pin_test_sound, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.output(output_pin_started, GPIO.LOW)
 GPIO.output(output_pin_failed, GPIO.LOW)
 
+GPIO.output(output_pin_speaker, GPIO.LOW)
+
 # --- Pin definitions ---
 ROWS = [4, 17]
 COLS = [27, 22]
@@ -51,7 +53,7 @@ KEYS = [
 ]
 
 editing = False
-
+speaker_output_required = True
 
 MONTHLY_SONGS="Monthly Songs"
 SCHEDULE_SONGS = "Schedule Songs"
@@ -723,11 +725,14 @@ def settings_menu():
         time.sleep(0.1)
 
 def set_speaker_output():
+    global speaker_output_required
     if settings["Speaker Output"]:
-        GPIO.output(output_pin_speaker, GPIO.HIGH)
+        speaker_output_required = True
+        #GPIO.output(output_pin_speaker, GPIO.HIGH)
         print("Speaker Output Enabled")
     else:
-        GPIO.output(output_pin_speaker, GPIO.LOW)
+        speaker_output_required = False
+        #GPIO.output(output_pin_speaker, GPIO.LOW)
         print("Speaker Output Disabled")
 
 #Play speech programs
@@ -737,7 +742,8 @@ def read_input_and_play_song():
 
 def play_audio(file_path):
     if os.path.exists(file_path):
-        
+        if speaker_output_required:
+            GPIO.output(output_pin_speaker, GPIO.HIGH)
         auto_set_volume(settings)  # Automatically adjust volume
 
         print(f"🎵 Playing: {file_path}")
@@ -751,6 +757,8 @@ def play_audio(file_path):
         # fade_out_ms = 2000  # 2 seconds fade-out
         # pygame.mixer.music.fadeout(fade_out_ms)
         # time.sleep(fade_out_ms / 1000)
+        if speaker_output_required:
+            GPIO.output(output_pin_speaker, GPIO.LOW)
 
 def play_random_from(folder):
     files = [f for f in os.listdir(folder) if f.endswith('.mp3')]
