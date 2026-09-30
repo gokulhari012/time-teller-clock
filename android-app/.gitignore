@@ -1,0 +1,11 @@
+# Gradle and Android Studio
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+
+# Signing key: keep a backup outside the repo (see README)
+signing/

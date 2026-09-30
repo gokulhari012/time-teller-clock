@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark mode: the header blue is light, so the status bar icons are dark -->
+    <style name="AppTheme" parent="Base.AppTheme">
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

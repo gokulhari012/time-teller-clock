@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Time Teller</string>
+    <string name="header_subtitle">Connect this phone to the clock</string>
+
+    <string name="status_searching">Looking for the clock…</string>
+    <string name="status_found">Connected to the clock</string>
+    <string name="status_no_wifi">This phone is not connected to any Wi-Fi. Do step 1.</string>
+    <string name="status_not_found">The clock is not answering. Check that this phone is on the %1$s Wi-Fi and the clock is switched on.</string>
+
+    <string name="step1_number" translatable="false">1</string>
+    <string name="step1_title">Connect to the clock\'s Wi-Fi</string>
+    <string name="step1_text">In the phone\'s Wi-Fi settings, choose:</string>
+    <string name="wifi_name_label">Wi-Fi name</string>
+    <string name="wifi_password_label">Password</string>
+    <string name="step1_hint">If the phone says this Wi-Fi has no internet, choose to stay connected.</string>
+    <string name="open_wifi_settings">Open Wi-Fi settings</string>
+
+    <string name="step2_number" translatable="false">2</string>
+    <string name="step2_title">Turn off mobile data</string>
+    <string name="step2_text">The clock\'s Wi-Fi has no internet. While mobile data is on, the phone may leave that Wi-Fi or use mobile data instead, and the clock can\'t be reached. Turn mobile data back on when you are done.</string>
+    <string name="step2_hint">Quick way: swipe down from the top of the screen and tap Mobile data.</string>
+    <string name="open_mobile_data">Open mobile data settings</string>
+
+    <string name="open_clock">Open clock settings</string>
+    <string name="opens_address">Opens %1$s</string>
+    <string name="loading_page">Connecting…</string>
+
+    <string name="not_found_title">Clock not found</string>
+    <string name="not_found_message">Check that this phone is connected to the %1$s Wi-Fi and the clock is switched on.</string>
+    <string name="try_again">Try again</string>
+    <string name="open_anyway">Open anyway</string>
+    <string name="page_failed">Could not open the clock settings. Check the steps and try again.</string>
+    <string name="unsaved_message">You have changes that are not saved. Leave without saving?</string>
+    <string name="leave">Leave</string>
+    <string name="stay">Stay</string>
+    <string name="no_settings">Open the phone\'s Settings app to do this.</string>
+    <string name="no_webview">Android System WebView is missing or updating on this phone. Try again in a minute.</string>
+</resources>

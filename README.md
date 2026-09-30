@@ -4,7 +4,7 @@ An automatic talking clock for the church. It runs on a Raspberry Pi connected t
 
 The clock keeps time with a battery-backed RTC (real-time clock) module, so it stays correct without the internet. A 16×2 LCD and a 4-button keypad on the front let you view the time and change settings without a keyboard or monitor.
 
-> **ESP32-C3 version:** the same clock is also available for an ESP32-C3 with an MP3-TF-16P module. It is in [esp32-time-teller-clock/](esp32-time-teller-clock/), with its own [README](esp32-time-teller-clock/README.md) covering wiring and SD card setup. The front-panel behavior described below applies to both versions. The ESP32 version can also be set up from a phone, through its own Wi-Fi hotspot and a settings page.
+> **ESP32-C3 version:** the same clock is also available for an ESP32-C3 with an MP3-TF-16P module. It is in [esp32-time-teller-clock/](esp32-time-teller-clock/), with its own [README](esp32-time-teller-clock/README.md) covering wiring and SD card setup. The front-panel behavior described below applies to both versions. The ESP32 version can also be set up from a phone, through its own Wi-Fi hotspot and a settings page. An Android app that opens that page is in [android-app/](android-app/README.md).
 
 ---
 
@@ -220,6 +220,7 @@ time-teller-clock/
 │       └── <folder>/                 # Optional sub-folders for "random from folder" schedules
 ├── Audio-files-acc-format.rar        # Original recordings in AAC format (before MP3 conversion)
 ├── esp32-time-teller-clock/          # ESP32-C3 + MP3-TF-16P version (Arduino sketch + SD card script)
+├── android-app/                      # Android app for the ESP32 settings page (TimeTeller.apk)
 ├── Dev Tools/                        # Hardware test scripts, TTS generators, setup notes
 ├── help.txt                          # How to convert .aac → .mp3 with ffmpeg
 ├── project-works.txt                 # Feature to-do list

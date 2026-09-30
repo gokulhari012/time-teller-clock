@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release builds are signed with this key, so a new build installs over the app already on the
+// phones. It is not in git: keep a copy somewhere safe (see README). Without it, the release
+// build is signed with this computer's debug key, and phones must uninstall the old app first.
+def releaseKey = rootProject.file('signing/time-teller.jks')
+
+android {
+    namespace = 'io.github.gokulhari012.timeteller'
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = 'io.github.gokulhari012.timeteller'
+        minSdk = 21          // Android 5.0
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+    }
+
+    signingConfigs {
+        release {
+            storeFile = releaseKey
+            storePassword = 'timeteller'
+            keyAlias = 'time-teller'
+            keyPassword = 'timeteller'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            signingConfig = releaseKey.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+}

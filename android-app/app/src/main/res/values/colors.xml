@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The colours of the clock's settings page (web_page.h), so the app and the page match.
+         Dark mode colours are in values-night/colors.xml. -->
+    <color name="bg">#F2F4F7</color>
+    <color name="card">#FFFFFF</color>
+    <color name="text">#1B2430</color>
+    <color name="muted">#667085</color>
+    <color name="line">#DDE2EA</color>
+    <color name="accent">#1F6FB2</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="button">#E8ECF1</color>
+    <color name="ripple">#1F000000</color>
+    <color name="ripple_on_accent">#40FFFFFF</color>
+
+    <!-- The box on the first screen that says whether the clock was found -->
+    <color name="searching_bg">#E3EDF7</color>
+    <color name="ok">#1E8E3E</color>
+    <color name="ok_bg">#E4F3E8</color>
+    <color name="warn">#B86E00</color>
+    <color name="warn_bg">#FDF1DE</color>
+    <color name="status_icon">#FFFFFF</color>
+
+    <!-- App icon (not changed in dark mode) -->
+    <color name="ic_launcher_background">#1F6FB2</color>
+</resources>

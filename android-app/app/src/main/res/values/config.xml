@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Must match the CONFIG section of esp32-time-teller-clock.ino. If you change them there,
+     change them here too and build the app again (see README). -->
+<resources>
+    <!-- The settings page. The clock's hotspot always gives the clock this address. -->
+    <string name="clock_url" translatable="false">http://192.168.4.1/</string>
+    <!-- HOTSPOT_NAME and HOTSPOT_PASSWORD, shown in step 1 -->
+    <string name="wifi_name" translatable="false">TimeTeller</string>
+    <string name="wifi_password" translatable="false">12345678</string>
+</resources>

@@ -56,7 +56,9 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 
 **Android:** the phone may warn that *TimeTeller has no internet access*. Choose **Stay connected** (or "Keep Wi-Fi connection"). If the page still won't open, turn off mobile data while you use it, so the phone doesn't send the request over mobile data instead.
 
-**Make it an "app":** once the page is open, add it to the home screen. In Chrome: menu **⋮** → **Add to Home screen**. In Safari: **Share** → **Add to Home Screen**. The icon then opens the settings page directly. The phone still has to be on the TimeTeller Wi-Fi.
+**Android app:** install [TimeTeller.apk](../android-app/TimeTeller.apk) from [android-app/](../android-app/README.md). It shows these steps, checks that the clock answers, and opens the page inside the app. It also reaches the clock with mobile data still on.
+
+**Or add the page to the home screen** (also works on iPhone): once the page is open, in Chrome use menu **⋮** → **Add to Home screen**, in Safari **Share** → **Add to Home Screen**. The icon then opens the settings page directly. The phone still has to be on the TimeTeller Wi-Fi.
 
 ### What the page has
 
