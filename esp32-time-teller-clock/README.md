@@ -28,7 +28,7 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Changing settings | LCD and keypad | LCD and buttons, **or a phone** over the clock's own Wi-Fi |
 | Schedules | `schedule.json` | Added, edited and deleted on the phone; saved in ESP32 flash |
 | Settings | `settings.json` | ESP32 flash, kept across power cuts |
-| Buttons | 2×2 matrix (4 buttons on 4 pins) | 4 separate buttons, each on its own pin |
+| Buttons | 2×2 matrix (4 buttons on 4 pins) | 4 separate buttons, each on its own pin, or the same 2×2 matrix (`BUTTONS_MATRIX`) |
 | Status LEDs | "Started" and "Failed" | One LED: steady = running, blinking = problem |
 | Speaker relay | Switches on and off around every clip | Stays on for the whole announcement (no clicks between clips) |
 | LCD clock | Updates once a minute | Updates every second |
@@ -94,7 +94,7 @@ The Wi-Fi password (`HOTSPOT_PASSWORD`) and the page password (`WEB_PASSWORD`) a
 | MP3-TF-16P module + micro-SD card | FAT32, 32 GB or smaller |
 | 16×2 I²C LCD (PCF8574 backpack) | Address `0x27` (sometimes `0x3F`) |
 | PCF8563 RTC module with coin cell | The same RTC as the Pi version |
-| 5 push buttons | LEFT, RIGHT, BACK, SET, TEST |
+| 5 push buttons | LEFT, RIGHT, BACK, SET, TEST. Or a 2×2 matrix keypad for the first four, plus one TEST button (see [Using a 2×2 matrix keypad](#using-a-22-matrix-keypad)) |
 | Relay module *(optional)* | Switches the amplifier or speaker power |
 | 1 LED + 330 Ω resistor | Status LED |
 | 1 kΩ resistor | Between the ESP32 TX pin and the MP3 module RX pin |
@@ -129,6 +129,21 @@ All the pin numbers are set at the top of the sketch, so you can change them.
 GPIO 2 is left free on purpose. It is a boot "strapping" pin, like GPIO 8 and GPIO 9. GPIO 8 and 9 are safe for I²C because the bus pull-up resistors hold them HIGH, which is what the chip needs at boot.
 
 > **The LCD and 5 V.** ESP32-C3 pins are **not 5 V tolerant**. Most PCF8574 LCD backpacks run at 5 V and pull SDA/SCL up to 5 V. Either put an I²C level shifter between the backpack and the ESP32, or use a 3.3 V LCD.
+
+### Using a 2×2 matrix keypad
+
+The LEFT, RIGHT, BACK and SET buttons can also be a 2×2 matrix keypad, like the Pi version uses. Set `BUTTONS_MATRIX = true` in the sketch's CONFIG section and wire the keypad's four lines to the same four pins:
+
+| Keypad line | ESP32-C3 pin | Setting |
+|-------------|--------------|---------|
+| L1 (row 1) | GPIO 0 | `PIN_MATRIX_L1` |
+| L2 (row 2) | GPIO 1 | `PIN_MATRIX_L2` |
+| R1 (column 1) | GPIO 3 | `PIN_MATRIX_R1` |
+| R2 (column 2) | GPIO 4 | `PIN_MATRIX_R2` |
+
+The keys are laid out like the Pi's keypad: **L1×R1 = LEFT**, **L1×R2 = RIGHT**, **L2×R1 = BACK**, **L2×R2 = SET**. The TEST button stays a separate button on GPIO 20.
+
+The sketch drives one row LOW at a time and reads the columns, which have pull-ups. The other row is left unconnected rather than driven HIGH, so pressing two keys at once can't short two pins together. Don't use GPIO 18/19 (the USB connection) or GPIO 21 (status LED) for the keypad; GPIO 22 doesn't exist on the ESP32-C3.
 
 ### Audio output
 

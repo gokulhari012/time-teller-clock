@@ -74,6 +74,21 @@ const uint8_t PIN_LED_STATUS = 21;  // ON = running, blinking = hardware problem
 
 const uint8_t RELAY_ON_LEVEL = HIGH;  // set to LOW for an active-low relay module
 
+// ---- Buttons: separate or 2x2 matrix ----
+// false = LEFT, RIGHT, BACK and SET are 4 separate buttons on PIN_BTN_LEFT..PIN_BTN_SET.
+// true  = they are a 2x2 matrix keypad (like the Pi version) on the 4 pins below:
+//              R1      R2
+//       L1    LEFT    RIGHT
+//       L2    BACK    SET
+// The TEST button stays a separate button on PIN_BTN_TEST either way.
+const bool BUTTONS_MATRIX = true;
+// Defaults reuse the separate-button pins. Don't use GPIO 18/19 (USB), 21 (status LED),
+// or 2/8/9 (boot pins); GPIO 22 doesn't exist on the ESP32-C3.
+const uint8_t PIN_MATRIX_L1 = 0;
+const uint8_t PIN_MATRIX_L2 = 1;
+const uint8_t PIN_MATRIX_R1 = 3;
+const uint8_t PIN_MATRIX_R2 = 4;
+
 // ---- LCD ----
 const uint8_t LCD_ADDRESS = 0x27;  // from an I2C scanner; usually 0x27 or 0x3F
 
@@ -437,11 +452,53 @@ void lcdPrintLine(uint8_t row, const char* text) {
   lcd.print(buf);
 }
 
+// The 2x2 matrix, row by row (L1: R1, R2, then L2: R1, R2), same layout as the Pi's KEYS
+const InputEvent MATRIX_KEYS[4] = { EV_LEFT, EV_RIGHT, EV_BACK, EV_SET };
+const uint8_t MATRIX_ROWS[2] = { PIN_MATRIX_L1, PIN_MATRIX_L2 };
+const uint8_t MATRIX_COLS[2] = { PIN_MATRIX_R1, PIN_MATRIX_R2 };
+
+void setupButtons() {
+  if (BUTTONS_MATRIX) {
+    // Rows rest as inputs (not driven HIGH), so pressing two buttons at once can't short
+    // a HIGH row to a LOW row. Each row is driven LOW only while it is being read.
+    for (uint8_t row : MATRIX_ROWS) pinMode(row, INPUT);
+    for (uint8_t col : MATRIX_COLS) pinMode(col, INPUT_PULLUP);
+    pinMode(PIN_BTN_TEST, INPUT_PULLUP);
+  } else {
+    for (Button& b : buttons) pinMode(b.pin, INPUT_PULLUP);
+  }
+}
+
+// Reads the whole matrix: bit k is set while MATRIX_KEYS[k] is held down
+uint8_t scanMatrix() {
+  uint8_t down = 0;
+  for (uint8_t r = 0; r < 2; r++) {
+    pinMode(MATRIX_ROWS[r], OUTPUT);
+    digitalWrite(MATRIX_ROWS[r], LOW);
+    delayMicroseconds(10);  // let the column settle
+    for (uint8_t c = 0; c < 2; c++) {
+      if (digitalRead(MATRIX_COLS[c]) == LOW) down |= 1 << (r * 2 + c);
+    }
+    pinMode(MATRIX_ROWS[r], INPUT);
+  }
+  return down;
+}
+
+bool buttonIsDown(const Button& b, uint8_t matrixDown) {
+  if (BUTTONS_MATRIX) {
+    for (uint8_t k = 0; k < 4; k++) {
+      if (MATRIX_KEYS[k] == b.event) return matrixDown & (1 << k);
+    }
+  }
+  return digitalRead(b.pin) == LOW;  // separate buttons, and TEST in both modes
+}
+
 // Returns one event per call: a press, an auto-repeat, or a SET long-press
 InputEvent readButtons() {
   uint32_t ms = millis();
+  uint8_t matrixDown = BUTTONS_MATRIX ? scanMatrix() : 0;
   for (Button& b : buttons) {
-    bool reading = digitalRead(b.pin) == LOW;
+    bool reading = buttonIsDown(b, matrixDown);
     if (reading != b.raw) {
       b.raw = reading;
       b.rawChangedAt = ms;
@@ -1249,7 +1306,7 @@ void setup() {
   pinMode(PIN_LED_STATUS, OUTPUT);
   digitalWrite(PIN_LED_STATUS, LOW);
   pinMode(PIN_MP3_BUSY, INPUT_PULLUP);
-  for (Button& b : buttons) pinMode(b.pin, INPUT_PULLUP);
+  setupButtons();
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   lcd.init();
