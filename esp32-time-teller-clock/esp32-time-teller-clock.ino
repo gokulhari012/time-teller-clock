@@ -793,10 +793,10 @@ void playAnnouncement(const DateTime& t, int scheduleIndex) {
   if (t.minute() % 15 == 0) {  // time clips exist only for quarter-hours
     playlistAdd(FOLDER_TIME, slotOf(t) + 1, nullptr);
   }
+  if (settings.churchName) playlistAddRandom(FOLDER_CHURCH_NAME, nullptr);
   playlistAdd(FOLDER_DATE, t.day(), nullptr);
   playlistAdd(FOLDER_MONTH, t.month(), nullptr);
   playlistAdd(FOLDER_DAY, t.dayOfTheWeek() + 1, nullptr);  // RTClib: 0 = Sunday
-  if (settings.churchName) playlistAddRandom(FOLDER_CHURCH_NAME, nullptr);
   playlistAddRandom(FOLDER_QUOTES, nullptr);
   if (settings.extraQuotes) playlistAddRandom(FOLDER_EXTRA_QUOTES, nullptr);
 
