@@ -73,6 +73,7 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 | **Sound** | Speaker output (relay), morning and evening volume (0–10), and the times the morning and evening volumes start. The start times are phone-only. |
 | **Schedules** | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from folder 14, or a random song from a folder 20–99). |
 | **SD card** | Lists each song folder with its number of files. Empty folders are shown in orange. **Rescan SD card** counts them again after you copy new songs, with no restart needed. |
+| **Clock health** | Free memory (and the lowest it has been since the clock started), how long the clock has been running, and why it last started. See [If the Wi-Fi drops](#if-the-wi-fi-drops). |
 
 ### Saving
 
@@ -210,6 +211,8 @@ If you use a Mac to copy the files, it adds hidden `._` files that the module co
 
 I compiled the sketch with esp32 core 3.3.2 for both board types listed above. It uses about 85% of the flash. The web server doesn't need any extra library.
 
+**Memory.** The ESP32-C3's 400 KB of RAM is plenty. The Arduino IDE reports 38 KB (11%) used for fixed data, and almost all of that belongs to the Wi-Fi and the ESP32's system software; the sketch's own variables take under 2 KB. The rest is free memory for Wi-Fi and the phone page. Each phone request builds its answer in one block of at most about 2.5 KB and frees it afterwards. **Clock health** on the phone page shows the free memory, and the Serial Monitor prints it once an hour.
+
 ---
 
 ## Configuration
@@ -223,6 +226,17 @@ const char* HOTSPOT_NAME     = "TimeTeller";
 const char* HOTSPOT_PASSWORD = "12345678";  // Wi-Fi password of the hotspot
 const char* WEB_PASSWORD     = "12345678";  // password asked by the settings page
 ```
+
+### Wi-Fi signal
+
+```cpp
+const wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
+const uint8_t HOTSPOT_CHANNEL = 1;
+```
+
+Many ESP32-C3 boards, the SuperMini especially, lose the Wi-Fi at full power (20 dBm): phones drop off the hotspot or can't join it. So the clock transmits at 8.5 dBm, which is enough for a phone in the same room or hall. If you need more range and the Wi-Fi stays stable, try `WIFI_POWER_11dBm`, `WIFI_POWER_13dBm` or `WIFI_POWER_15dBm` (`WIFI_POWER_19_5dBm` is full power). The internet time uses the same power.
+
+`HOTSPOT_CHANNEL` is the hotspot's Wi-Fi channel: use 1, 6 or 11. If phones still drop, other Wi-Fi nearby may be on the same channel, so try another one.
 
 ### Internet time (optional)
 
@@ -282,8 +296,21 @@ Schedules are managed on the phone page. On first boot the clock starts with the
 | Clips cut off or overlap | Check the BUSY wire to GPIO 7. |
 | Hum or clicks | Add the capacitor across the MP3 module's power. Keep the audio ground away from the relay wiring. |
 | LCD blank or boxes | Check the I²C address (`LCD_ADDRESS`), the contrast potentiometer and the level shifter. |
-| The phone can't find the `TimeTeller` Wi-Fi | Watch the Serial Monitor at startup. `Hotspot did not start` means a password in CONFIG is shorter than 8 characters. Some ESP32-C3 SuperMini boards have a weak antenna, so stand closer to the clock. |
+| The phone can't find the `TimeTeller` Wi-Fi | Watch the Serial Monitor at startup. `Hotspot did not start` means a password in CONFIG is shorter than 8 characters. Otherwise stand closer to the clock, or raise `WIFI_TX_POWER` (see [Wi-Fi signal](#wi-fi-signal)). |
+| The phone keeps dropping off the Wi-Fi | See [If the Wi-Fi drops](#if-the-wi-fi-drops) below. |
 | The settings page doesn't open | Type `http://192.168.4.1`, starting with `http://`, not `https://`. On Android, choose *Stay connected* when the phone says there is no internet, or turn off mobile data. |
 | The page keeps asking for the password | The settings password is `WEB_PASSWORD` in the sketch (`12345678` unless you changed it). |
-| Internet time never works (SuperMini boards) | Some ESP32-C3 SuperMini boards have a weak antenna. Add `WiFi.setTxPower(WIFI_POWER_8_5dBm);` after `WiFi.begin(...)` in `syncTimeFromInternet()`. |
+| Internet time never works | Check `WIFI_SSID` and `WIFI_PASSWORD`, and that the clock is in range of the church Wi-Fi. If the board is near the edge of its range, raise `WIFI_TX_POWER` a step. |
 | New songs aren't played | Tap **Rescan SD card** on the phone page, or restart the clock. |
+
+### If the Wi-Fi drops
+
+First open **Clock health** at the bottom of the phone page.
+
+- **The clock restarted by itself.** *Running for* starts again from 0 (the daily restart at 3:55 AM shows as *restart*), and *Last start* says why:
+  - *low power*: the 5 V supply dips, often when the amplifier or relay switches on. Use a 2 A 5 V supply (the MP3 module's speaker amplifier alone can draw most of 1 A), short power wires, and the 100–470 µF capacitor.
+  - *crash* or *watchdog*: a program fault. Note what the clock was doing at the time.
+- **The clock kept running, but the phone left the hotspot.** Connect the clock to a computer and watch the Serial Monitor while it happens:
+  - `Phone left the hotspot, reason 3` or `reason 8`: the phone left by itself, usually because the hotspot has no internet. Choose *Stay connected* when the phone asks, turn off mobile data, or turn off *Switch to mobile data* in the phone's Wi-Fi settings (on Samsung phones it is under *Intelligent Wi-Fi*).
+  - Any other reason number: the clock lost the phone. If that happens even next to the clock, try another `HOTSPOT_CHANNEL` and check the 5 V supply. If it only happens farther away, raise `WIFI_TX_POWER` one step.
+- **Free memory** should stay about the same from hour to hour. Every phone request frees the memory it used, so free memory that keeps falling would point to a fault.

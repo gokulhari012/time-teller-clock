@@ -144,6 +144,12 @@ tr.empty td{color:var(--warn)}
   <p class="muted">Rescan after copying new songs onto the card.</p>
 </section>
 
+<section>
+  <h2>Clock health</h2>
+  <p id="health" class="muted">-</p>
+  <p class="muted">Free memory should stay about the same from hour to hour. If the clock restarts by itself, <i>Running for</i> starts again from 0 and <i>Last start</i> says why: <i>low power</i> means the 5 V supply dips, <i>crash</i> or <i>watchdog</i> means a program fault. The daily restart at 3:55 AM shows as <i>restart</i>, and a restart from a computer over the USB cable as <i>USB</i>.</p>
+</section>
+
 </main>
 
 <div id="bar"><span>Unsaved changes</span><div class="btns"><button onclick="undo()">Undo</button><button class="primary" onclick="save()">Save</button></div></div>
@@ -213,9 +219,14 @@ function toast(msg) {
 }
 function fail(e) { if (e.message) toast(e.message); }
 
-async function api(path, data) {
+async function api(path, data, timeout) {
   const opt = {headers: {Authorization: 'Basic ' + btoa('admin:' + pw)}};
   if (data) { opt.method = 'POST'; opt.body = new URLSearchParams(data); }
+  if (timeout && window.AbortController) {  // give up on an answer that never comes (weak Wi-Fi)
+    const ctl = new AbortController();
+    opt.signal = ctl.signal;
+    setTimeout(() => ctl.abort(), timeout);
+  }
   let r;
   try { r = await fetch(path, opt); }
   catch (e) { throw new Error('Clock not reachable. Is this phone on the TimeTeller Wi-Fi?'); }
@@ -407,7 +418,7 @@ async function act(name) {
     const r = await api('/api/' + name, {});
     if (r.status) showStatus(r.status);
     toast(r.message || 'Done');
-    poll();
+    refresh();
   } catch (e) { fail(e); }
 }
 
@@ -432,6 +443,9 @@ function showStatus(st) {
   $('folders').innerHTML = st.folders.length ? '<table>' + st.folders.map(f =>
     '<tr' + (f[1] ? '' : ' class="empty"') + '><td>' + pad(f[0]) + '</td><td>' + (FOLDERS[f[0]] || 'custom song folder') + '</td><td>' +
     (f[1] ? f[1] + ' files' : 'empty') + '</td></tr>').join('') + '</table>' : 'No folders counted (is the MP3 module connected?).';
+  const kb = n => Math.round(n / 1024) + ' KB', h = Math.floor(st.uptime / 3600), m = Math.floor(st.uptime % 3600 / 60);
+  $('health').innerHTML = 'Free memory: <b>' + kb(st.heap) + '</b> (lowest ' + kb(st.minHeap) + ')<br>' +
+    'Running for: <b>' + (h ? h + ' h ' : '') + m + ' min</b><br>Last start: <b>' + esc(st.reset) + '</b>';
 }
 function tick() {
   if (offset === null) return;
@@ -441,9 +455,14 @@ function tick() {
   $('clock').textContent = text;
   $('devtime').textContent = text;
 }
-async function poll() {
+async function refresh() {
   if (!S) return;
-  try { showStatus(await api('/api/status')); } catch (e) {}
+  try { showStatus(await api('/api/status', null, 8000)); } catch (e) {}
+}
+// The status every 5 s: one request at a time, and none while the page is hidden
+async function poll() {
+  if (!document.hidden) await refresh();
+  setTimeout(poll, 5000);
 }
 
 // ---- start ----
@@ -458,7 +477,7 @@ async function poll() {
   $('dTime').value = now.slice(11, 19);
   window.onbeforeunload = () => (dirtyS || dirtyK) ? true : undefined;
   setInterval(tick, 1000);
-  setInterval(poll, 5000);
+  setTimeout(poll, 5000);
   load().catch(fail);
 })();
 </script>

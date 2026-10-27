@@ -7,7 +7,7 @@
  *
  *   GET  /               the settings page
  *   GET  /api/state      settings, schedules and status, as JSON
- *   GET  /api/status     clock time, what is playing, SD card folders
+ *   GET  /api/status     clock time, what is playing, SD card folders, free memory
  *   POST /api/settings   save the menu settings
  *   POST /api/schedules  replace the schedule list
  *   POST /api/time       set the clock (t = YYYY-MM-DDTHH:MM:SS)
@@ -102,13 +102,21 @@ void redrawLcdMenu() {
 // JSON
 // ============================================================
 
-String statusJson() {
-  char buf[160];
+// Each answer is built in one String with its room reserved first, so it takes a single
+// block of memory instead of growing (and being copied) many times while it is built.
+const size_t STATUS_JSON_SIZE   = 512;  // the status, with up to about 40 SD card folders
+const size_t SCHEDULE_JSON_SIZE = 80;   // one schedule
+
+void addStatusJson(String& json) {
+  char buf[200];
   snprintf(buf, sizeof(buf),
-           "{\"time\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"playing\":%d,\"label\":\"%s\",\"mp3\":%d,\"folders\":[",
+           "{\"time\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"playing\":%d,\"label\":\"%s\",\"mp3\":%d,"
+           "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lu,\"reset\":\"%s\",\"folders\":[",
            rtcNow.year(), rtcNow.month(), rtcNow.day(), rtcNow.hour(), rtcNow.minute(), rtcNow.second(),
-           isPlayerIdle() ? 0 : 1, playingLabel ? playingLabel : "", mp3Ok ? 1 : 0);
-  String json = buf;
+           isPlayerIdle() ? 0 : 1, playingLabel ? playingLabel : "", mp3Ok ? 1 : 0,
+           (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
+           (unsigned long)(esp_timer_get_time() / 1000000), resetReasonText());
+  json += buf;
   bool first = true;
   for (uint8_t folder = 1; folder < 100; folder++) {
     if (!folderCounted[folder]) continue;
@@ -117,10 +125,9 @@ String statusJson() {
     first = false;
   }
   json += "]}";
-  return json;
 }
 
-String settingsJson() {
+void addSettingsJson(String& json) {
   char teller[25], happy[25], sunday[25], buf[420];
   slotsToHex(settings.tellerTimes, teller);
   slotsToHex(settings.happyTimes, happy);
@@ -132,23 +139,39 @@ String settingsJson() {
            teller, happy, sunday, settings.silenceOn, settings.silenceStart, settings.silenceEnd,
            settings.monthlySongs, settings.churchName, settings.extraQuotes, settings.speakerOutput,
            settings.morningVolume, settings.eveningVolume, settings.morningFrom, settings.eveningFrom);
-  return String(buf);
+  json += buf;
 }
 
-String schedulesJson() {
-  String json = "[";
+void addSchedulesJson(String& json) {
   char buf[140];
+  json += "[";
   for (uint8_t i = 0; i < scheduleCount; i++) {
     const Schedule& s = schedules[i];
     snprintf(buf, sizeof(buf), "%s{\"n\":\"%s\",\"h\":%d,\"m\":%d,\"d\":%d,\"mo\":%d,\"t\":%d,\"k\":%d,\"e\":%d}",
              i ? "," : "", s.name, s.hour, s.minute, s.days, s.months, s.songType, s.songNumber, s.enabled);
     json += buf;
   }
-  return json + "]";
+  json += "]";
 }
 
-String stateJson() {
-  return "{\"settings\":" + settingsJson() + ",\"schedules\":" + schedulesJson() + ",\"status\":" + statusJson() + "}";
+void sendStatus() {
+  String json;
+  json.reserve(STATUS_JSON_SIZE);
+  addStatusJson(json);
+  sendJson(json);
+}
+
+void sendState() {
+  String json;
+  json.reserve(400 + scheduleCount * SCHEDULE_JSON_SIZE + STATUS_JSON_SIZE);  // settings + schedules + status
+  json += "{\"settings\":";
+  addSettingsJson(json);
+  json += ",\"schedules\":";
+  addSchedulesJson(json);
+  json += ",\"status\":";
+  addStatusJson(json);
+  json += "}";
+  sendJson(json);
 }
 
 // ============================================================
@@ -162,12 +185,12 @@ void handlePage() {
 
 void handleState() {
   if (!authorized()) return;
-  sendJson(stateJson());
+  sendState();
 }
 
 void handleStatus() {
   if (!authorized()) return;
-  sendJson(statusJson());
+  sendStatus();
 }
 
 void handleSaveSettings() {
@@ -204,7 +227,7 @@ void handleSaveSettings() {
   saveSettings();
   if (!settings.speakerOutput) setRelay(false);
   redrawLcdMenu();
-  sendJson(stateJson());
+  sendState();
 }
 
 void handleSaveSchedules() {
@@ -250,7 +273,7 @@ void handleSaveSchedules() {
   saveSchedules();
   folderCountPending = true;  // count any new song folders once nothing is playing
   redrawLcdMenu();
-  sendJson(stateJson());
+  sendState();
 }
 
 void handleSetTime() {
@@ -264,12 +287,12 @@ void handleSetTime() {
     sendError(400, "Bad date or time");
     return;
   }
-  rtc.adjust(DateTime(y, mo, d, h, mi, s));
-  rtcNow = rtc.now();
+  rtcNow = DateTime(y, mo, d, h, mi, s);
+  rtc.adjust(rtcNow);
   lastMinute = rtcNow.minute();  // don't announce just because the minute changed
   Serial.println("RTC time set from the phone.");
   if (screen == SCREEN_HOME) drawHome();
-  sendJson(statusJson());
+  sendStatus();
 }
 
 void handleTest() {
@@ -309,7 +332,7 @@ void handleRescan() {
     return;
   }
   countAllFolders();
-  sendJson(stateJson());
+  sendState();
 }
 
 void handleNotFound() {
@@ -320,12 +343,26 @@ void handleNotFound() {
 // START AND RUN
 // ============================================================
 
+// Serial Monitor lines when a phone joins or leaves the hotspot. Reason 3 or 8 means the phone
+// left by itself (for example, it found no internet and switched networks); other reasons
+// mean the clock lost the phone (weak signal or interference). Runs in the Wi-Fi event task.
+void onHotspotEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_AP_STACONNECTED) {
+    Serial.printf("Phone joined the hotspot (%d connected)\n", WiFi.softAPgetStationNum());
+  } else if (event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) {
+    Serial.printf("Phone left the hotspot, reason %d (%d still connected)\n",
+                  info.wifi_ap_stadisconnected.reason, WiFi.softAPgetStationNum());
+  }
+}
+
 void startWebSettings() {
+  WiFi.onEvent(onHotspotEvent);
   WiFi.mode(WIFI_AP);
-  if (!WiFi.softAP(HOTSPOT_NAME, HOTSPOT_PASSWORD)) {
+  if (!WiFi.softAP(HOTSPOT_NAME, HOTSPOT_PASSWORD, HOTSPOT_CHANNEL)) {
     Serial.println("Hotspot did not start (the password needs at least 8 characters)");
     return;
   }
+  if (!WiFi.setTxPower(WIFI_TX_POWER)) Serial.println("Could not set the Wi-Fi power");
   snprintf(hotspotIp, sizeof(hotspotIp), "%s", WiFi.softAPIP().toString().c_str());
 
   server.on("/", HTTP_GET, handlePage);

@@ -48,6 +48,17 @@ const char* HOTSPOT_NAME     = "TimeTeller";
 const char* HOTSPOT_PASSWORD = "12345678";  // Wi-Fi password of the hotspot
 const char* WEB_PASSWORD     = "12345678";  // password asked by the settings page
 
+// ---- Wi-Fi signal ----
+// Many ESP32-C3 boards, the SuperMini especially, lose the Wi-Fi at full power (20 dBm):
+// phones drop off the hotspot or can't join it. 8.5 dBm usually cures this, and is enough
+// for a phone in the same room or hall. To reach farther, try WIFI_POWER_11dBm,
+// WIFI_POWER_13dBm or WIFI_POWER_15dBm (WIFI_POWER_19_5dBm is full power).
+// Used for the hotspot and for the internet time below.
+const wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
+// Hotspot channel: 1, 6 or 11. If phones still drop, other Wi-Fi nearby may be using
+// the same channel, so try another one.
+const uint8_t HOTSPOT_CHANNEL = 1;
+
 // ---- Internet time (optional) ----
 // If the church has Wi-Fi with internet, the clock can join it at startup,
 // copy the internet time into the RTC, and then start its hotspot.
@@ -534,6 +545,32 @@ uint8_t scrollStep() {
 }
 
 // ============================================================
+// HEALTH (Serial Monitor and phone page)
+// ============================================================
+
+// Why the chip last started. "low power" means the 5 V supply dipped too far (brownout).
+const char* resetReasonText() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power on";
+    case ESP_RST_SW:       return "restart";  // the daily restart
+    case ESP_RST_USB:      return "USB";      // after an upload
+    case ESP_RST_PANIC:    return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "low power";
+    default:               return "other";
+  }
+}
+
+// Free memory should stay about the same from hour to hour. If it keeps falling, something leaks.
+void logHealth() {
+  Serial.printf("Memory: %lu bytes free (lowest %lu, largest block %lu). Loop stack: %lu bytes never used\n",
+                (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
+                (unsigned long)ESP.getMaxAllocHeap(), (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
+}
+
+// ============================================================
 // WI-FI TIME SYNC
 // ============================================================
 
@@ -542,6 +579,7 @@ bool syncTimeFromInternet() {
 
   lcdPrintLine(1, "Wi-Fi sync...");
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_TX_POWER);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
@@ -846,6 +884,8 @@ bool inSundaySilence(const DateTime& t) {
 }
 
 void onNewMinute(const DateTime& t) {
+  if (t.minute() == 0) logHealth();  // once an hour
+
   if (DAILY_RESTART && t.hour() == DAILY_RESTART_HOUR && t.minute() == DAILY_RESTART_MINUTE &&
       isPlayerIdle() && screen == SCREEN_HOME) {
     Serial.println("Daily restart");
@@ -1070,8 +1110,8 @@ void startTimeEditor() {
 }
 
 void saveEditedTime() {
-  rtc.adjust(DateTime(editDt.year, editDt.month, editDt.day, editDt.hour, editDt.minute, editDt.second));
-  rtcNow = rtc.now();
+  rtcNow = DateTime(editDt.year, editDt.month, editDt.day, editDt.hour, editDt.minute, editDt.second);
+  rtc.adjust(rtcNow);
   lastMinute = rtcNow.minute();  // don't announce just because the minute was edited
   Serial.println("RTC time updated.");
   showMessage("RTC Updated!", "Back to Main", SCREEN_MENU);
@@ -1362,9 +1402,12 @@ void setup() {
 
   startWebSettings();  // phone settings page (web_settings.ino)
 
-  rtcNow = rtc.now();
+  DateTime t = rtc.now();
+  if (t.isValid()) rtcNow = t;   // a failed I2C read gives an impossible date (month 0) that the screens can't show
   lastMinute = rtcNow.minute();  // wait for the next minute, like the Pi version
   statusLed = mp3Ok ? STATUS_ON : STATUS_BLINK;
+  Serial.printf("Last start: %s\n", resetReasonText());
+  logHealth();
   Serial.println("Time Teller with Scheduler started.");
   enterScreen(SCREEN_HOME);
 }
