@@ -35,10 +35,31 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Start-up time | About 70 s | A few seconds (plus Wi-Fi sync, if set) |
 | Internet time | Copied when the internet is reachable | Copied only after a real NTP answer |
 | Morning/evening volume | Uses the system clock; switches at 5 AM and 5 PM | Uses the RTC; the switch times can be changed on the phone |
+| Church name clip | After the weekday | Right after the spoken time (see [Playback order](#playback-order)) |
 
-Everything else behaves the same: the announcement order, the song rules (monthly, Sunday and happy songs), Teller Times, Sunday Silence and the LCD menu. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
+Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Teller Times, Sunday Silence and the LCD menu. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
 
 > **Updating from the first ESP32 version:** the SD card folder numbers have changed. Build the card again with `prepare_sd_card.py --overwrite`. The new menu settings start at their defaults, which match the old behavior: an announcement and a happy song every 15 minutes.
+
+### Playback order
+
+Every announcement plays these clips one after another. The order is set in `playAnnouncement()` in [esp32-time-teller-clock.ino](esp32-time-teller-clock.ino).
+
+| # | Step | SD folder | How the file is picked |
+|---|------|-----------|------------------------|
+| 1 | Rhythm / intro music | `01` | Random |
+| 2 | Greeting ("wishing") | `02` | Random |
+| 3 | Spoken time (quarter-hours only) | `03` | hour × 4 + minute ÷ 15 + 1 |
+| 4 | Church name (if *Church Name* is ON) | `07` | Random |
+| 5 | Spoken date | `04` | Day of the month |
+| 6 | Spoken month | `05` | Month number |
+| 7 | Spoken weekday | `06` | `001` = Sunday … `007` = Saturday |
+| 8 | Quote | `08` | Random |
+| 9 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
+| 10 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `10`/`11` | Random, or none (see [Which song plays](../README.md#which-song-plays)) |
+| 11 | Custom song (schedules with a song only) | `14`, or `20`–`99` | The schedule's file number, or random from its folder |
+
+An announcement starts at a quarter-hour that is ON in *Teller Times*, or at a time where a schedule matches the hour, minute, weekday and month. Nothing plays during Sunday Silence, or while the previous announcement is still playing.
 
 ---
 

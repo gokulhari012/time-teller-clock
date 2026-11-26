@@ -6,7 +6,7 @@
  *
  * At the times chosen in the "Teller Times" menu, and at the times of the
  * schedules, it plays:
- *   rhythm -> wishing -> time -> date -> month -> day -> church name -> quote
+ *   rhythm -> wishing -> time -> church name -> date -> month -> day -> quote
  *   -> extra quote -> song
  * The song is a monthly, Sunday or happy song as set in the menu; a schedule's
  * custom song plays after it.
@@ -822,6 +822,9 @@ uint8_t chooseSongFolder(const DateTime& t) {
   return 0;
 }
 
+// Playback order List
+// If you change the order of the clips below, also update the "Playback order"
+// table in README.md (this folder) and the order in the comment at the top of this file.
 void playAnnouncement(const DateTime& t, int scheduleIndex) {
   Serial.printf("[%04d-%02d-%02d %02d:%02d:%02d] Playing time teller audio...\n",
                 t.year(), t.month(), t.day(), t.hour(), t.minute(), t.second());

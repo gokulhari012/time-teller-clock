@@ -67,6 +67,8 @@ Every announcement plays these clips one after another. Each step waits for the 
 | 10 | Song for this time | See [Which song plays](#which-song-plays) | Random `.mp3`, or none |
 | 11 | Custom song (schedules with a `custom_song` only) | `Custom_songs/` or `Custom_songs/<folder>/` | That exact file, or a random `.mp3` from the folder |
 
+The ESP32 version plays the church name right after the spoken time instead. See its [Playback order](esp32-time-teller-clock/README.md#playback-order).
+
 If a file picked by name (steps 3–6) is missing, that step is skipped silently. If a folder for a random pick is missing, that step is skipped and `Folder not found, skipping` is written to the log. Time files exist only for quarter-hours, so a custom schedule at a time like 06:05 plays without a spoken time.
 
 ### Which song plays
