@@ -152,7 +152,8 @@ static_assert(!resistor_based_key || (PIN_KEYS_ANALOG <= 4 && PIN_KEYS_ANALOG !=
 // ---- LCD ----
 const uint8_t LCD_ADDRESS = 0x27;  // from an I2C scanner; usually 0x27 or 0x3F
 // The backlight goes off when no button has been pressed for this long, and the next
-// button press turns it on again (that press only wakes the display). 0 = always on.
+// button press turns it on again (that press only wakes the display). When it goes off,
+// an open menu is saved and closed, back to the home screen. 0 = always on.
 const uint32_t LCD_BACKLIGHT_TIMEOUT_MS = 5UL * 60 * 1000;  // 5 minutes
 
 // ---- MP3 module ----
@@ -850,6 +851,31 @@ bool anyButtonHeld() {
   return false;
 }
 
+// When the backlight goes off: leave any menu for the home screen, saving the changes
+// as BACK would. An unfinished Date & Time edit is dropped (saving it would set the
+// clock to the time shown when it was left, minutes ago).
+void leaveMenuForHome() {
+  switch (screen) {
+    case SCREEN_HOME:
+      return;
+    case SCREEN_SCHEDULES:
+      saveSchedules();
+      break;
+    case SCREEN_EDIT_TIME:
+      Serial.println("Date & Time edit left unfinished, not saved");
+      break;
+    default:  // the menu, time lists, Sunday Silence, Monthly Songs, a message
+      saveSettings();
+      break;
+  }
+  if (!settings.speakerOutput) setRelay(false);
+  editAdjusting = false;
+  silenceAdjusting = false;
+  timeListConfirm = false;
+  Serial.println("Display idle: back to the home screen");
+  enterScreen(SCREEN_HOME);
+}
+
 // Turns the backlight off after LCD_BACKLIGHT_TIMEOUT_MS without a button press, and on
 // again at the next press. The press that wakes the display is not used for anything else
 // (also not its auto-repeats or SET long-press), so it can't change a setting unseen.
@@ -862,6 +888,7 @@ InputEvent backlightFilter(InputEvent ev) {
   }
   if (ev == EV_NONE) {
     if (backlightOn && millis() - lastButtonMs >= LCD_BACKLIGHT_TIMEOUT_MS) {
+      leaveMenuForHome();
       lcd.noBacklight();
       backlightOn = false;
     }
