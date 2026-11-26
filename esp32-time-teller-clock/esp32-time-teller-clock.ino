@@ -151,6 +151,9 @@ static_assert(!resistor_based_key || (PIN_KEYS_ANALOG <= 4 && PIN_KEYS_ANALOG !=
 
 // ---- LCD ----
 const uint8_t LCD_ADDRESS = 0x27;  // from an I2C scanner; usually 0x27 or 0x3F
+// The backlight goes off when no button has been pressed for this long, and the next
+// button press turns it on again (that press only wakes the display). 0 = always on.
+const uint32_t LCD_BACKLIGHT_TIMEOUT_MS = 5UL * 60 * 1000;  // 5 minutes
 
 // ---- MP3 module ----
 // Some MP3-TF-16P clones don't send acknowledgements. If the LCD shows
@@ -833,6 +836,47 @@ InputEvent readButtons() {
     }
   }
   return EV_NONE;
+}
+
+// ---- LCD backlight ----
+bool backlightOn = true;
+bool wakePressHeld = false;  // the button that woke the display is still held down
+uint32_t lastButtonMs = 0;
+
+bool anyButtonHeld() {
+  for (const Button& b : buttons) {
+    if (b.pressed) return true;
+  }
+  return false;
+}
+
+// Turns the backlight off after LCD_BACKLIGHT_TIMEOUT_MS without a button press, and on
+// again at the next press. The press that wakes the display is not used for anything else
+// (also not its auto-repeats or SET long-press), so it can't change a setting unseen.
+// TEST still plays the test song.
+InputEvent backlightFilter(InputEvent ev) {
+  if (LCD_BACKLIGHT_TIMEOUT_MS == 0) return ev;
+  if (wakePressHeld) {
+    if (!anyButtonHeld()) wakePressHeld = false;
+    return EV_NONE;
+  }
+  if (ev == EV_NONE) {
+    if (backlightOn && millis() - lastButtonMs >= LCD_BACKLIGHT_TIMEOUT_MS) {
+      lcd.noBacklight();
+      backlightOn = false;
+    }
+    return EV_NONE;
+  }
+  lastButtonMs = millis();
+  if (!backlightOn) {
+    lcd.backlight();
+    backlightOn = true;
+    if (ev != EV_TEST) {
+      wakePressHeld = true;
+      return EV_NONE;
+    }
+  }
+  return ev;
 }
 
 // Time lists move 15 minutes per step, or an hour once LEFT/RIGHT has been held a while
@@ -1803,11 +1847,12 @@ void setup() {
   logHealth();
   Serial.println("Time Teller with Scheduler started.");
   enterScreen(SCREEN_HOME);
+  lastButtonMs = millis();  // the backlight stays on for LCD_BACKLIGHT_TIMEOUT_MS after startup
 }
 
 void loop() {
   updateClock();
-  InputEvent ev = readButtons();
+  InputEvent ev = backlightFilter(readButtons());
   if (ev != EV_NONE) handleEvent(ev);
   updatePlayer();
   updateMp3Relay();

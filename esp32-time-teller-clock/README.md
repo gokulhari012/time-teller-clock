@@ -410,6 +410,7 @@ Schedules saved by an older version with a folder number 20–99 are changed to 
 ### Other options
 
 - **`LCD_ADDRESS`**: the LCD's I²C address, usually `0x27`, sometimes `0x3F`.
+- **`LCD_BACKLIGHT_TIMEOUT_MS`**: the LCD backlight turns off after 5 minutes without a button press. The next press turns it back on, and that press does nothing else (so a setting can't change while the screen is dark). TEST still plays the test song straight away. The clock keeps working with the backlight off. Set to `0` to keep the backlight always on.
 - **`RELAY_ON_LEVEL`**: set to `LOW` for an active-low relay board.
 - **`DAILY_RESTART`**: restarts the clock at 03:55 every day, like the Pi's cron reboot. The restart is skipped if audio is playing or a menu is open.
 
