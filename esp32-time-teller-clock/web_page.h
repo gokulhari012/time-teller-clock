@@ -67,11 +67,14 @@ tr.empty td{color:var(--warn)}
 #login.show{display:flex}
 #login section{width:100%;max-width:340px}
 #login input{width:100%}
+body.user .admin{display:none}
+#who{font-size:12px;opacity:.9}
+#who a{color:inherit}
 #toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:30;background:var(--text);color:var(--bg);padding:9px 14px;border-radius:8px;display:none;max-width:90%;text-align:center}
 </style>
 </head>
 <body>
-<header><h1>Time Teller</h1><div id="clock">Connecting...</div></header>
+<header><h1>Time Teller</h1><div id="clock">Connecting...</div><div id="who"></div></header>
 <main>
 
 <section>
@@ -107,7 +110,7 @@ tr.empty td{color:var(--warn)}
   <div class="btns" id="exactAdd"><input type="time" id="xTime" value="06:05"><button onclick="addExact()">+ Add time</button></div>
 </section>
 
-<section>
+<section class="admin">
   <h2>Language</h2>
   <div class="row first"><span>Announcement language<br><span class="muted">all audio comes from this Language folder on the SD card</span></span><select id="language"><option value="0">Language 1</option><option value="1">Language 2</option><option value="2">Language 3</option></select></div>
 </section>
@@ -133,6 +136,21 @@ tr.empty td{color:var(--warn)}
 </section>
 
 <section>
+  <h2>MP3 Player Relay</h2>
+  <div class="row first"><span>MP3 Player Relay<br><span class="muted">ON: the relay is ON, and goes OFF while the time teller plays, then back ON</span></span><label class="sw"><input type="checkbox" id="mp3Relay"><span></span></label></div>
+</section>
+
+<section class="admin">
+  <h2>Season based songs</h2>
+  <p class="muted">In a season that is ON, its song plays instead of the happy, Sunday or monthly song. If its folder has no songs, the normal song plays.</p>
+  <div class="row first"><span>Good Friday week<br><span class="muted">good_friday, Palm Sunday to Holy Saturday</span></span><label class="sw"><input type="checkbox" id="season1"><span></span></label></div>
+  <div class="row"><span>Easter<br><span class="muted">easter_sunday, on Easter Sunday only</span></span><label class="sw"><input type="checkbox" id="season2"><span></span></label></div>
+  <div class="row"><span>Christmas week<br><span class="muted">christmas, 25 to 31 December</span></span><label class="sw"><input type="checkbox" id="season4"><span></span></label></div>
+  <div class="row"><span>New Year week<br><span class="muted">new_year, 1 to 7 January</span></span><label class="sw"><input type="checkbox" id="season8"><span></span></label></div>
+  <p class="muted" id="easterDate"></p>
+</section>
+
+<section>
   <h2>Startup screen</h2>
   <p class="muted">Shown on the LCD for 2 seconds each when the clock starts. Up to 16 characters.</p>
   <div class="row first"><span>Show mobile number</span><label class="sw"><input type="checkbox" id="showPhone"><span></span></label></div>
@@ -140,7 +158,7 @@ tr.empty td{color:var(--warn)}
   <div class="row"><span>Name<br><span class="muted">shown after the number; empty = not shown</span></span><input type="text" id="startName" maxlength="16"></div>
 </section>
 
-<section>
+<section class="admin">
   <h2>Sound</h2>
   <div class="row first"><span>Speaker output (relay)</span><label class="sw"><input type="checkbox" id="speaker"><span></span></label></div>
   <div class="row"><span>Morning volume: <b id="volMorningV"></b></span><input type="range" min="0" max="10" id="volMorning"></div>
@@ -149,7 +167,7 @@ tr.empty td{color:var(--warn)}
   <div class="row"><span>Evening volume from</span><select id="eveningFrom"></select></div>
 </section>
 
-<section>
+<section class="admin">
   <h2>Schedules</h2>
   <p class="muted">Extra announcements at exact times, with a custom song after the song set for that time. They run whichever Program is used. Song and sub-folder numbers are in track-list.txt on the SD card, and are the same in every language.</p>
   <div id="scheds"></div>
@@ -157,17 +175,25 @@ tr.empty td{color:var(--warn)}
   <button id="addSched" onclick="editSched(-1)">+ Add schedule</button>
 </section>
 
-<section>
+<section class="admin">
   <h2>SD card</h2>
   <div id="folders" class="muted"></div>
   <div class="btns" style="margin-top:8px"><button onclick="act('rescan')">Rescan SD card</button></div>
   <p class="muted">Rescan after copying new songs onto the card.</p>
 </section>
 
-<section>
+<section class="admin">
   <h2>Clock health</h2>
   <p id="health" class="muted">-</p>
   <p class="muted">Free memory should stay about the same from hour to hour. If the clock restarts by itself, <i>Running for</i> starts again from 0 and <i>Last start</i> says why: <i>low power</i> means the 5 V supply dips, <i>crash</i> or <i>watchdog</i> means a program fault. The daily restart at 3:55 AM shows as <i>restart</i>, and a restart from a computer over the USB cable as <i>USB</i>.</p>
+</section>
+
+<section class="admin">
+  <h2>Login passwords</h2>
+  <p class="muted">The <b>Admin</b> login sees everything. The <b>User</b> login can't see Sound, Language, Season based songs, Schedules, SD card, Clock health and this box. 4-16 characters, no spaces. Leave a box empty to keep that password. If a password is forgotten, the LCD menu <i>Web Passwords</i> shows both.</p>
+  <div class="row first"><span>New admin password</span><input type="password" id="newAdmin" maxlength="16" autocomplete="new-password"></div>
+  <div class="row"><span>New user password</span><input type="password" id="newUser" maxlength="16" autocomplete="new-password"></div>
+  <div class="btns"><button class="primary" onclick="savePasswords()">Save passwords</button></div>
 </section>
 
 </main>
@@ -176,9 +202,10 @@ tr.empty td{color:var(--warn)}
 
 <div id="login"><section>
   <h2>Time Teller</h2>
-  <p class="muted">Enter the settings password.</p>
-  <input type="password" id="pw" onkeydown="if(event.key==='Enter')login()">
-  <div class="btns" style="margin-top:10px"><button class="primary" onclick="login()">Open settings</button></div>
+  <p class="muted">Log in to change the settings.</p>
+  <div class="tabs" id="roleTabs"><button data-r="admin" onclick="pickRole('admin')">Admin</button><button data-r="user" onclick="pickRole('user')">User</button></div>
+  <input type="password" id="pw" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+  <div class="btns" style="margin-top:10px"><button class="primary" onclick="login()">Log in</button></div>
   <p class="muted" id="loginMsg"></p>
 </section></div>
 
@@ -192,11 +219,13 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const FOLDERS = {1: 'Rythem', 2: 'Wishing', 3: 'Time', 4: 'Date', 5: 'Month', 6: 'Day', 7: 'church_name',
   8: 'Quotes', 9: 'extra_quotes', 10: 'happy_songs_morning', 11: 'happy_songs_evening', 12: 'sunday_songs',
   13: 'monthly_songs', 14: 'Custom_songs', 15: 'Test song', 16: 'Year', 17: 'Dongle', 18: 'Blessing_prayer',
-  19: 'happy_songs_early_morning', 20: 'happy_songs_night'};
+  19: 'happy_songs_early_morning', 20: 'happy_songs_night', 21: 'good_friday', 22: 'easter_sunday',
+  23: 'christmas', 24: 'new_year'};
 const folderName = f => {
   const n = (f - 1) % 33 + 1;
-  return 'Language_' + (Math.floor((f - 1) / 33) + 1) + ' / ' + (FOLDERS[n] || 'Custom_songs sub-folder ' + (n - 20));
+  return 'Language_' + (Math.floor((f - 1) / 33) + 1) + ' / ' + (FOLDERS[n] || 'Custom_songs sub-folder ' + (n - 24));
 };
+const SEASONS = [1, 2, 4, 8];  // Good Friday week, Easter, Christmas week, New Year week (bits of S.seasons)
 const HAPPY_PARTS = {0: 'Early morning songs (happy_songs_early_morning)', 6: 'Morning songs (happy_songs_morning)',
   12: 'Evening songs (happy_songs_evening)', 18: 'Night songs (happy_songs_night)'};
 const HELP = {
@@ -208,8 +237,12 @@ const HELP = {
 // Specific minutes: what plays, as bits of f
 const XFLAGS = [['Teller', 1], ['Happy song', 2], ['Sunday song', 4], ['Blessing', 8]];
 
-let pw = '';
-try { pw = localStorage.getItem('ttPassword') || ''; } catch (e) {}
+let pw = '', role = 'admin';  // login: role is 'admin' or 'user'
+try {
+  pw = localStorage.getItem('ttPassword') || '';
+  role = localStorage.getItem('ttRole') || 'admin';  // older pages only had the admin login
+} catch (e) {}
+let admin = false;     // true when the clock says this login is the admin
 let S = null;          // settings being edited
 let scheds = [];       // schedules being edited
 let dirtyS = false, dirtyK = false;
@@ -253,7 +286,7 @@ function toast(msg) {
 function fail(e) { if (e.message) toast(e.message); }
 
 async function api(path, data, timeout) {
-  const opt = {headers: {Authorization: 'Basic ' + btoa('admin:' + pw)}};
+  const opt = {headers: {Authorization: 'Basic ' + btoa(role + ':' + pw)}};
   if (data) { opt.method = 'POST'; opt.body = new URLSearchParams(data); }
   if (timeout && window.AbortController) {  // give up on an answer that never comes (weak Wi-Fi)
     const ctl = new AbortController();
@@ -269,13 +302,30 @@ async function api(path, data, timeout) {
   return j;
 }
 
-function showLogin(msg) { $('login').classList.add('show'); $('loginMsg').textContent = msg; }
+function showLogin(msg) { $('login').classList.add('show'); $('loginMsg').textContent = msg; pickRole(role); }
+function pickRole(r) {
+  role = r;
+  document.querySelectorAll('#roleTabs button').forEach(b => b.classList.toggle('sel', b.dataset.r === r));
+}
 async function login() {
   pw = $('pw').value;
   try {
     await load();
-    try { localStorage.setItem('ttPassword', pw); } catch (e) {}
+    try { localStorage.setItem('ttPassword', pw); localStorage.setItem('ttRole', role); } catch (e) {}
+    $('pw').value = '';
   } catch (e) { fail(e); }
+}
+function logout() {
+  if ((dirtyS || dirtyK) && !confirm('Log out without saving the changes?')) return;
+  pw = ''; S = null; dirtyS = dirtyK = false; bar();
+  try { localStorage.removeItem('ttPassword'); } catch (e) {}
+  showLogin('');
+}
+// Shows or hides the admin sections for the login the clock reported
+function setRole(r) {
+  admin = r === 'admin';
+  document.body.classList.toggle('user', !admin);
+  $('who').innerHTML = 'Logged in as ' + (admin ? 'Admin' : 'User') + ' &middot; <a href="#" onclick="logout();return false">Log out</a>';
 }
 
 async function load() {
@@ -288,6 +338,7 @@ async function load() {
   prog = S.program;
   scheds = st.schedules;
   dirtyS = dirtyK = false;
+  setRole(st.status.role);
   edit = null;
   $('login').classList.remove('show');
   render();
@@ -297,7 +348,7 @@ function undo() { load().catch(fail); }
 
 function changed() { dirtyS = true; bar(); }
 function bar() { $('bar').classList.toggle('show', dirtyS || dirtyK); }
-function render() { renderGrid(); renderExact(); renderForm(); renderMonths(); renderScheds(); bar(); }
+function render() { renderGrid(); renderExact(); renderForm(); renderMonths(); renderSeasons(); renderScheds(); bar(); }
 
 // ---- time grids ----
 const P = () => S.programs[prog];  // the Program being edited
@@ -358,7 +409,7 @@ function delExact(i) { P().exact.splice(i, 1); changed(); renderExact(); }
 function flagExact(i, bit) { P().exact[i].f ^= bit; changed(); renderExact(); }
 
 // ---- switches, selects and sliders ----
-const SWITCHES = ['silenceOn', 'churchName', 'extraQuotes', 'speaker', 'showPhone'];
+const SWITCHES = ['silenceOn', 'churchName', 'extraQuotes', 'speaker', 'showPhone', 'mp3Relay'];
 const TEXTS = ['phone', 'startName'];
 const cleanText = v => v.replace(/[^\x20-\x7e]|["\\]/g, '');  // what the LCD can show
 const NUMBERS = ['silenceStart', 'silenceEnd', 'morningFrom', 'eveningFrom', 'volMorning', 'volEvening', 'program', 'language'];
@@ -375,6 +426,22 @@ function renderMonths() {
     '<button class="chip' + (S.months >> i & 1 ? ' on' : '') + '" onclick="month(' + i + ')">' + m + '</button>').join('');
 }
 function month(i) { S.months ^= 1 << i; changed(); renderMonths(); }
+
+// ---- season based songs ----
+function easterOf(y) {  // Western (Gregorian) Easter Sunday, as the clock works it out
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const n = h + l - 7 * m + 114;
+  return new Date(y, Math.floor(n / 31) - 1, n % 31 + 1);
+}
+function renderSeasons() {
+  SEASONS.forEach(bit => { $('season' + bit).checked = !!(S.seasons & bit); });
+  const y = new Date(Date.now() + (offset || 0)).getFullYear(), e = easterOf(y);
+  const gf = new Date(e.getFullYear(), e.getMonth(), e.getDate() - 2);
+  $('easterDate').textContent = 'In ' + y + ': Good Friday ' + gf.getDate() + ' ' + MONTHS[gf.getMonth()] +
+    ', Easter Sunday ' + e.getDate() + ' ' + MONTHS[e.getMonth()] + '.';
+}
 
 // ---- schedules ----
 const daysText = d => d === 127 ? 'Every day' : DAYS.filter((_, i) => d >> i & 1).join(', ');
@@ -434,7 +501,7 @@ function grab() {  // copy the editor inputs into draft
 function showNumber() {
   const t = +$('eType').value;
   $('eNumRow').style.display = t ? '' : 'none';
-  $('eNumLabel').textContent = t === 1 ? 'Song number in Custom_songs' : 'Sub-folder number (1-13)';
+  $('eNumLabel').textContent = t === 1 ? 'Song number in Custom_songs' : 'Sub-folder number (1-9)';
 }
 function typeChanged() { grab(); showNumber(); }
 function dayChip(i) { grab(); draft.d = i < 0 ? (draft.d === 127 ? 0 : 127) : draft.d ^ (1 << i); renderEditor(); }
@@ -446,7 +513,7 @@ function applySched() {
   if (!d.d) return toast('Pick at least one day');
   if (!d.mo) return toast('Pick at least one month');
   if (d.t === 1 && !(d.k >= 1 && d.k <= 255)) return toast('Song number must be 1-255');
-  if (d.t === 2 && !(d.k >= 1 && d.k <= 13)) return toast('Sub-folder number must be 1-13');
+  if (d.t === 2 && !(d.k >= 1 && d.k <= 9)) return toast('Sub-folder number must be 1-9');
   if (d.t === 0) d.k = 0;
   if (edit < 0) scheds.push(d); else scheds[edit] = d;
   edit = null; dirtyK = true; bar(); renderScheds();
@@ -468,10 +535,11 @@ async function save() {
         silenceOn: S.silenceOn ? 1 : 0, silenceStart: S.silenceStart, silenceEnd: S.silenceEnd, months: S.months,
         churchName: S.churchName ? 1 : 0, extraQuotes: S.extraQuotes ? 1 : 0, speaker: S.speaker ? 1 : 0,
         volMorning: S.volMorning, volEvening: S.volEvening, morningFrom: S.morningFrom, eveningFrom: S.eveningFrom,
-        showPhone: S.showPhone ? 1 : 0, phone: S.phone.trim(), startName: S.startName.trim()
+        showPhone: S.showPhone ? 1 : 0, phone: S.phone.trim(), startName: S.startName.trim(),
+        mp3Relay: S.mp3Relay ? 1 : 0, seasons: S.seasons
       }));
     }
-    if (dirtyK) {
+    if (dirtyK && admin) {
       const d = {count: scheds.length};
       scheds.forEach((s, i) => {
         d['n' + i] = s.n; d['h' + i] = s.h; d['m' + i] = s.m; d['d' + i] = s.d;
@@ -481,6 +549,18 @@ async function save() {
     }
     await load();
     toast('Saved');
+  } catch (e) { fail(e); }
+}
+
+async function savePasswords() {
+  const a = $('newAdmin').value, u = $('newUser').value, ok = v => !v || /^[\x21-\x7e]{4,16}$/.test(v);
+  if (!a && !u) return toast('Type a new password first');
+  if (!ok(a) || !ok(u)) return toast('A password needs 4-16 characters, no spaces');
+  try {
+    const r = await api('/api/passwords', {admin: a, user: u});
+    if (a && role === 'admin') { pw = a; try { localStorage.setItem('ttPassword', pw); } catch (e) {} }
+    $('newAdmin').value = $('newUser').value = '';
+    toast(r.message || 'Saved');
   } catch (e) { fail(e); }
 }
 
@@ -515,6 +595,8 @@ function showStatus(st) {
   $('folders').innerHTML = st.folders.length ? '<table>' + st.folders.map(f =>
     '<tr' + (f[1] ? '' : ' class="empty"') + '><td>' + pad(f[0]) + '</td><td>' + folderName(f[0]) + '</td><td>' +
     (f[1] ? f[1] + ' files' : 'empty') + '</td></tr>').join('') + '</table>' : 'No folders counted (is the MP3 module connected?).';
+  if (st.role) setRole(st.role);
+  if (st.heap === undefined) return;  // clock health is for the admin only
   const kb = n => Math.round(n / 1024) + ' KB', h = Math.floor(st.uptime / 3600), m = Math.floor(st.uptime % 3600 / 60);
   $('health').innerHTML = 'Free memory: <b>' + kb(st.heap) + '</b> (lowest ' + kb(st.minHeap) + ')<br>' +
     'Running for: <b>' + (h ? h + ' h ' : '') + m + ' min</b><br>Last start: <b>' + esc(st.reset) + '</b>';
@@ -545,6 +627,7 @@ async function poll() {
   SWITCHES.forEach(k => { $(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; changed(); }; });
   NUMBERS.forEach(k => { $(k).oninput = e => { S[k] = +e.target.value; changed(); renderForm(); if (k === 'program') renderGrid(); }; });
   TEXTS.forEach(k => { $(k).oninput = e => { S[k] = cleanText(e.target.value); changed(); }; });
+  SEASONS.forEach(bit => { $('season' + bit).onchange = e => { S.seasons = e.target.checked ? S.seasons | bit : S.seasons & ~bit; changed(); }; });
   const now = stamp(new Date());
   $('dDate').value = now.slice(0, 10);
   $('dTime').value = now.slice(11, 19);

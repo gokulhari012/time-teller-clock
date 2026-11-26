@@ -15,17 +15,23 @@
  *   POST /api/announce   play the announcement for the current time
  *   POST /api/stop       stop playing
  *   POST /api/rescan     count the files on the SD card again
+ *   POST /api/passwords  change the admin and user passwords
  *
- * Every /api/ request needs WEB_PASSWORD (HTTP Basic auth, user "admin").
+ * Every /api/ request needs a login (HTTP Basic auth): user "admin" with the admin
+ * password, or user "user" with the user password. A user can't change Sound,
+ * Language and Season based songs, and can't use /api/schedules, /api/rescan and
+ * /api/passwords or see the SD card folders and clock health.
  * The handlers run inside loop(), so they never overlap the clock or the LCD.
  */
 
 #include "web_page.h"
 
-const char* WEB_USER = "admin";  // the settings page always logs in with this name
+const char* ADMIN_LOGIN = "admin";  // login names; the passwords are in settings
+const char* USER_LOGIN  = "user";
 
 WebServer server(80);
 bool webStarted = false;
+bool requestIsAdmin = false;  // the request being answered logged in as admin
 
 // ============================================================
 // HELPERS
@@ -40,11 +46,20 @@ void sendError(int code, const String& message) {
   server.send(code, "application/json", "{\"error\":\"" + message + "\"}");
 }
 
-// Checks the password. Without it, answers 401 without a WWW-Authenticate header,
-// so the phone shows the page's own password box instead of a browser pop-up.
+// Checks the login (admin or user). Without it, answers 401 without a WWW-Authenticate
+// header, so the phone shows the page's own login box instead of a browser pop-up.
 bool authorized() {
-  if (server.authenticate(WEB_USER, WEB_PASSWORD)) return true;
+  requestIsAdmin = server.authenticate(ADMIN_LOGIN, settings.adminPassword);
+  if (requestIsAdmin || server.authenticate(USER_LOGIN, settings.userPassword)) return true;
   sendError(401, "Wrong password");
+  return false;
+}
+
+// For requests only the admin may make: answers 403 to a user login
+bool adminOnly() {
+  if (!authorized()) return false;
+  if (requestIsAdmin) return true;
+  sendError(403, "Only the admin can do this");
   return false;
 }
 
@@ -138,17 +153,24 @@ void redrawLcdMenu() {
 const size_t STATUS_JSON_SIZE   = 512;  // the status, with up to about 40 SD card folders
 const size_t SCHEDULE_JSON_SIZE = 80;   // one schedule
 const size_t PROGRAM_JSON_SIZE  = 260;  // one Program: four time lists and 20 specific minutes
-const size_t SETTINGS_JSON_SIZE = 400 + PROGRAM_COUNT * PROGRAM_JSON_SIZE;
+const size_t SETTINGS_JSON_SIZE = 440 + PROGRAM_COUNT * PROGRAM_JSON_SIZE;
 
 void addStatusJson(String& json) {
   char buf[200];
   snprintf(buf, sizeof(buf),
            "{\"time\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"playing\":%d,\"label\":\"%s\",\"mp3\":%d,"
-           "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lu,\"reset\":\"%s\",\"language\":%d,\"folders\":[",
+           "\"language\":%d,\"role\":\"%s\",",
            rtcNow.year(), rtcNow.month(), rtcNow.day(), rtcNow.hour(), rtcNow.minute(), rtcNow.second(),
            isPlayerIdle() ? 0 : 1, playingLabel ? playingLabel : "", mp3Ok ? 1 : 0,
+           settings.language, requestIsAdmin ? "admin" : "user");
+  json += buf;
+  if (!requestIsAdmin) {  // clock health and SD card folders are for the admin only
+    json += "\"folders\":[]}";
+    return;
+  }
+  snprintf(buf, sizeof(buf), "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lu,\"reset\":\"%s\",\"folders\":[",
            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
-           (unsigned long)(esp_timer_get_time() / 1000000), resetReasonText(), settings.language);
+           (unsigned long)(esp_timer_get_time() / 1000000), resetReasonText());
   json += buf;
   bool first = true;
   for (uint8_t folder = 1; folder < 100; folder++) {
@@ -184,7 +206,7 @@ void addProgramJson(String& json, const Program& p) {
 }
 
 void addSettingsJson(String& json) {
-  char buf[440];
+  char buf[480];
   json += "{\"programs\":[";
   for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
     if (i) json += ",";
@@ -194,11 +216,11 @@ void addSettingsJson(String& json) {
            "],\"program\":%d,\"language\":%d,\"silenceOn\":%d,\"silenceStart\":%d,"
            "\"silenceEnd\":%d,\"months\":%d,\"churchName\":%d,\"extraQuotes\":%d,\"speaker\":%d,"
            "\"volMorning\":%d,\"volEvening\":%d,\"morningFrom\":%d,\"eveningFrom\":%d,"
-           "\"showPhone\":%d,\"phone\":\"%s\",\"startName\":\"%s\"}",
+           "\"showPhone\":%d,\"phone\":\"%s\",\"startName\":\"%s\",\"mp3Relay\":%d,\"seasons\":%d}",
            settings.program, settings.language, settings.silenceOn, settings.silenceStart, settings.silenceEnd,
            settings.monthlySongs, settings.churchName, settings.extraQuotes, settings.speakerOutput,
            settings.morningVolume, settings.eveningVolume, settings.morningFrom, settings.eveningFrom,
-           settings.showPhone, settings.phone, settings.startName);
+           settings.showPhone, settings.phone, settings.startName, settings.mp3Relay, settings.seasons);
   json += buf;
 }
 
@@ -227,7 +249,11 @@ void sendState() {
   json += "{\"settings\":";
   addSettingsJson(json);
   json += ",\"schedules\":";
-  addSchedulesJson(json);
+  if (requestIsAdmin) {
+    addSchedulesJson(json);
+  } else {
+    json += "[]";  // schedules are for the admin only
+  }
   json += ",\"status\":";
   addStatusJson(json);
   json += "}";
@@ -270,8 +296,6 @@ void handleSaveSettings() {
   }
   if (!readNumber("program", 0, PROGRAM_COUNT - 1, v)) return;
   updated.program = v;
-  if (!readNumber("language", 0, LANGUAGE_COUNT - 1, v)) return;
-  updated.language = v;
   if (!readNumber("silenceOn", 0, 1, v)) return;
   updated.silenceOn = v;
   if (!readNumber("silenceStart", 0, SLOT_COUNT - 1, v)) return;
@@ -284,16 +308,29 @@ void handleSaveSettings() {
   updated.churchName = v;
   if (!readNumber("extraQuotes", 0, 1, v)) return;
   updated.extraQuotes = v;
-  if (!readNumber("speaker", 0, 1, v)) return;
-  updated.speakerOutput = v;
-  if (!readNumber("volMorning", 0, 10, v)) return;
-  updated.morningVolume = v;
-  if (!readNumber("volEvening", 0, 10, v)) return;
-  updated.eveningVolume = v;
-  if (!readNumber("morningFrom", 0, SLOT_COUNT - 1, v)) return;
-  updated.morningFrom = v;
-  if (!readNumber("eveningFrom", 0, SLOT_COUNT - 1, v)) return;
-  updated.eveningFrom = v;
+  // Sound, Language and Season based songs: admin only (a user's values are ignored)
+  if (requestIsAdmin) {
+    if (!readNumber("language", 0, LANGUAGE_COUNT - 1, v)) return;
+    updated.language = v;
+    if (!readNumber("speaker", 0, 1, v)) return;
+    updated.speakerOutput = v;
+    if (!readNumber("volMorning", 0, 10, v)) return;
+    updated.morningVolume = v;
+    if (!readNumber("volEvening", 0, 10, v)) return;
+    updated.eveningVolume = v;
+    if (!readNumber("morningFrom", 0, SLOT_COUNT - 1, v)) return;
+    updated.morningFrom = v;
+    if (!readNumber("eveningFrom", 0, SLOT_COUNT - 1, v)) return;
+    updated.eveningFrom = v;
+    if (server.hasArg("seasons")) {
+      if (!readNumber("seasons", 0, ALL_SEASONS, v)) return;
+      updated.seasons = v;
+    }
+  }
+  if (server.hasArg("mp3Relay")) {
+    if (!readNumber("mp3Relay", 0, 1, v)) return;
+    updated.mp3Relay = v;
+  }
   // Startup screen: optional, so an older page that doesn't send these still saves
   if (server.hasArg("showPhone")) {
     if (!readNumber("showPhone", 0, 1, v)) return;
@@ -306,6 +343,7 @@ void handleSaveSettings() {
   settings = updated;
   saveSettings();
   if (!settings.speakerOutput) setRelay(false);
+  updateMp3Relay();
   if (languageChanged) {
     languageCountPending = true;
     if (mp3Ok && isPlayerIdle()) countAllFolders();  // so the answer lists the new language's folders
@@ -315,7 +353,7 @@ void handleSaveSettings() {
 }
 
 void handleSaveSchedules() {
-  if (!authorized()) return;
+  if (!adminOnly()) return;
   long count, v;
   if (!readNumber("count", 0, MAX_SCHEDULES, count)) return;
 
@@ -341,7 +379,7 @@ void handleSaveSchedules() {
     snprintf(key, sizeof(key), "t%d", i);
     if (!readNumber(key, SONG_NONE, SONG_FOLDER, v)) return;
     s.songType = (SongType)v;
-    // Song number: a file 1-255 in Custom_songs, or a Custom_songs sub-folder 1-13
+    // Song number: a file 1-255 in Custom_songs, or a Custom_songs sub-folder 1-9
     long low = s.songType == SONG_NONE ? 0 : 1;
     long high = s.songType == SONG_FOLDER ? MAX_CUSTOM_FOLDERS : 255;
     snprintf(key, sizeof(key), "k%d", i);
@@ -406,7 +444,7 @@ void handleStop() {
 }
 
 void handleRescan() {
-  if (!authorized()) return;
+  if (!adminOnly()) return;
   if (!mp3Ok) {
     sendError(503, "MP3 module not found");
     return;
@@ -417,6 +455,32 @@ void handleRescan() {
   }
   countAllFolders();
   sendState();
+}
+
+// A password: 4-16 characters the LCD can show, no spaces (the LCD menu "Web Passwords" shows it)
+bool readPassword(const char* name, char* out, size_t size) {
+  String text = server.arg(name);
+  if (text.length() == 0) return true;  // empty = keep the current password
+  bool ok = text.length() >= 4 && text.length() < size;
+  for (size_t i = 0; ok && i < text.length(); i++) ok = text[i] >= 33 && text[i] <= 126;
+  if (!ok) {
+    sendError(400, "A password needs 4-16 letters, numbers or signs, without spaces");
+    return false;
+  }
+  snprintf(out, size, "%s", text.c_str());
+  return true;
+}
+
+void handlePasswords() {
+  if (!adminOnly()) return;
+  char admin[sizeof(settings.adminPassword)], user[sizeof(settings.userPassword)];
+  memcpy(admin, settings.adminPassword, sizeof(admin));
+  memcpy(user, settings.userPassword, sizeof(user));
+  if (!readPassword("admin", admin, sizeof(admin)) || !readPassword("user", user, sizeof(user))) return;
+  memcpy(settings.adminPassword, admin, sizeof(admin));
+  memcpy(settings.userPassword, user, sizeof(user));
+  saveSettings();
+  sendJson("{\"message\":\"Passwords saved\"}");
 }
 
 void handleNotFound() {
@@ -459,6 +523,7 @@ void startWebSettings() {
   server.on("/api/announce", HTTP_POST, handleAnnounce);
   server.on("/api/stop", HTTP_POST, handleStop);
   server.on("/api/rescan", HTTP_POST, handleRescan);
+  server.on("/api/passwords", HTTP_POST, handlePasswords);
   server.onNotFound(handleNotFound);
   server.begin();
   webStarted = true;

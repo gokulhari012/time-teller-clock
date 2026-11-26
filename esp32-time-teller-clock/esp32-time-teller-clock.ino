@@ -9,9 +9,11 @@
  *   rhythm -> wishing -> dongle (bell, rung once per hour) -> time -> date
  *   -> month -> day -> year -> church name -> blessing prayer -> quote
  *   -> extra quote -> song
- * The blessing prayer plays at the Blessing times. The song is a monthly, Sunday
- * or happy song as set for that time; a schedule's custom song plays after it.
+ * The blessing prayer plays at the Blessing times. The song is a season (Good Friday
+ * week, Easter, Christmas week, New Year week), monthly, Sunday or happy song as set
+ * for that time; a schedule's custom song plays after it.
  * All audio comes from the selected language (Language_1, _2 or _3 on the SD card).
+ * The MP3 Player Relay (if ON) switches an outside MP3 player off while it plays.
  *
  * Settings can be changed on the LCD, or on a phone: the clock makes its own
  * Wi-Fi hotspot (HOTSPOT_NAME below) and serves a settings page at
@@ -45,10 +47,15 @@
 
 // ---- Phone settings page ----
 // The clock makes its own Wi-Fi hotspot. Connect a phone to it and open
-// http://192.168.4.1 to change the settings. Both passwords need 8+ characters.
+// http://192.168.4.1 to change the settings. The hotspot password needs 8+ characters.
 const char* HOTSPOT_NAME     = "TimeTeller";
 const char* HOTSPOT_PASSWORD = "12345678";  // Wi-Fi password of the hotspot
-const char* WEB_PASSWORD     = "12345678";  // password asked by the settings page
+// Settings page logins. Admin sees everything; User doesn't see Sound, Language,
+// Season based songs, Schedules, SD card and Clock health. These are the first-boot
+// passwords: the admin can change both on the page, and the LCD menu "Web Passwords"
+// shows them if one is forgotten.
+const char* DEFAULT_ADMIN_PASSWORD = "12345678";
+const char* DEFAULT_USER_PASSWORD  = "user1234";
 
 // ---- Wi-Fi signal ----
 // Many ESP32-C3 boards, the SuperMini especially, lose the Wi-Fi at full power (20 dBm):
@@ -84,23 +91,63 @@ const uint8_t PIN_BTN_SET    = 4;
 const uint8_t PIN_BTN_TEST   = 20;  // plays the test song
 const uint8_t PIN_RELAY      = 10;  // speaker / amplifier power relay
 const uint8_t PIN_LED_STATUS = 21;  // ON = running, blinking = hardware problem
+// MP3 Player Relay: ON while the feature is ON and the time teller is not playing,
+// so an outside MP3 player is switched off while the time teller speaks.
+// GPIO 1 is free with resistor_based_key; with the other two key types it is a
+// key pin, so pick another free pin (the build stops with a message if it clashes).
+const uint8_t PIN_MP3_RELAY  = 1;
 
-const uint8_t RELAY_ON_LEVEL = HIGH;  // set to LOW for an active-low relay module
+const uint8_t RELAY_ON_LEVEL     = HIGH;  // set to LOW for an active-low relay module
+const uint8_t MP3_RELAY_ON_LEVEL = HIGH;  // the same, for the MP3 Player Relay
 
-// ---- Buttons: separate or 2x2 matrix ----
-// false = LEFT, RIGHT, BACK and SET are 4 separate buttons on PIN_BTN_LEFT..PIN_BTN_SET.
-// true  = they are a 2x2 matrix keypad (like the Pi version) on the 4 pins below:
-//              R1      R2
-//       L1    LEFT    RIGHT
-//       L2    BACK    SET
-// The TEST button stays a separate button on PIN_BTN_TEST either way.
-const bool BUTTONS_MATRIX = true;
+// ---- Buttons: set exactly ONE of these to true ----
+// normal_button:      LEFT, RIGHT, BACK and SET are 4 separate buttons on PIN_BTN_LEFT..PIN_BTN_SET,
+//                     each connecting its pin to GND.
+// matrix_keys:        a 2x2 matrix keypad (like the Pi version) on the 4 PIN_MATRIX_ pins below:
+//                              R1      R2
+//                       L1    LEFT    RIGHT
+//                       L2    BACK    SET
+// resistor_based_key: all 4 buttons on 2 wires, GND and PIN_KEYS_ANALOG. Each button
+//                     connects the pin to GND through its own resistor, so each gives its
+//                     own voltage (RESISTOR_KEYS below). Also needs a 10k resistor from
+//                     PIN_KEYS_ANALOG to 3.3V on the ESP32 side.
+// The TEST button stays a separate button on PIN_BTN_TEST with all three.
+const bool normal_button      = false;
+const bool matrix_keys        = false;
+const bool resistor_based_key = true;
 // Defaults reuse the separate-button pins. Don't use GPIO 18/19 (USB), 21 (status LED),
 // or 2/8/9 (boot pins); GPIO 22 doesn't exist on the ESP32-C3.
 const uint8_t PIN_MATRIX_L1 = 0;
 const uint8_t PIN_MATRIX_L2 = 1;
 const uint8_t PIN_MATRIX_R1 = 3;
 const uint8_t PIN_MATRIX_R2 = 4;
+// Resistor keys: must be an analog pin, GPIO 0-4 on the ESP32-C3
+const uint8_t PIN_KEYS_ANALOG = 0;
+
+// Voltage of each resistor key, in millivolts. The ESP32-C3 reads only up to about
+// 2.5 V, so the keys use 0.5 V steps (1 V, 2 V... would leave room for 2 keys only).
+// With the 10k pull-up: LEFT 1.8k, RIGHT 4.3k, BACK 8.2k, SET 15k to GND.
+// With other resistors, the Serial Monitor prints "Key ... mV" at each press:
+// write those numbers here.
+enum InputEvent : uint8_t { EV_NONE, EV_LEFT, EV_RIGHT, EV_BACK, EV_SET, EV_SET_LONG, EV_TEST };
+struct ResistorKey { InputEvent event; uint16_t millivolts; };
+const ResistorKey RESISTOR_KEYS[] = {
+  { EV_LEFT,   500 },
+  { EV_RIGHT, 1000 },
+  { EV_BACK,  1500 },
+  { EV_SET,   2000 },
+};
+const uint16_t RESISTOR_KEY_TOLERANCE_MV = 200;   // a reading this close to a key's voltage is that key
+const uint16_t RESISTOR_NO_KEY_MV        = 2300;  // above this, no key is pressed
+
+static_assert(normal_button + matrix_keys + resistor_based_key == 1,
+              "Set exactly one of normal_button, matrix_keys and resistor_based_key to true");
+static_assert(resistor_based_key ||
+              (PIN_MP3_RELAY != PIN_BTN_LEFT && PIN_MP3_RELAY != PIN_BTN_RIGHT &&
+               PIN_MP3_RELAY != PIN_BTN_BACK && PIN_MP3_RELAY != PIN_BTN_SET),
+              "PIN_MP3_RELAY is also a key pin: choose another free pin for PIN_MP3_RELAY");
+static_assert(!resistor_based_key || (PIN_KEYS_ANALOG <= 4 && PIN_KEYS_ANALOG != PIN_MP3_RELAY),
+              "PIN_KEYS_ANALOG must be GPIO 0-4 and not the same pin as PIN_MP3_RELAY");
 
 // ---- LCD ----
 const uint8_t LCD_ADDRESS = 0x27;  // from an I2C scanner; usually 0x27 or 0x3F
@@ -149,8 +196,24 @@ const uint8_t FOLDER_DONGLE        = 17;  // 001.mp3 = one bell sound, rung once
 const uint8_t FOLDER_BLESSING      = 18;  // random file (blessing prayer)
 const uint8_t FOLDER_HAPPY_EARLY   = 19;  // random file, for 12 AM to 6 AM (happy_songs_early_morning)
 const uint8_t FOLDER_HAPPY_NIGHT   = 20;  // random file, for 6 PM to 12 AM (happy_songs_night)
-const uint8_t FOLDER_FIRST_CUSTOM  = 21;  // 21-33 = Custom_songs sub-folders 1-13 (SONG_FOLDER schedules)
-const uint8_t MAX_CUSTOM_FOLDERS   = LANGUAGE_FOLDERS - FOLDER_FIRST_CUSTOM + 1;  // 13
+const uint8_t FOLDER_GOOD_FRIDAY   = 21;  // random file, season song (good_friday)
+const uint8_t FOLDER_EASTER        = 22;  // random file, season song (easter_sunday)
+const uint8_t FOLDER_CHRISTMAS     = 23;  // random file, season song (christmas)
+const uint8_t FOLDER_NEW_YEAR      = 24;  // random file, season song (new_year)
+const uint8_t FOLDER_FIRST_CUSTOM  = 25;  // 25-33 = Custom_songs sub-folders 1-9 (SONG_FOLDER schedules)
+const uint8_t MAX_CUSTOM_FOLDERS   = LANGUAGE_FOLDERS - FOLDER_FIRST_CUSTOM + 1;  // 9
+
+// ---- Season based songs ----
+// In a season, its song plays instead of the happy, Sunday or monthly song (at the
+// times those would play). Each season is turned ON/OFF on the phone page.
+//   Good Friday week: Palm Sunday to Holy Saturday (the week before Easter)
+//   Easter:           Easter Sunday only (Western date, as in most Indian churches)
+//   Christmas week:   CHRISTMAS_FIRST_DAY to CHRISTMAS_LAST_DAY of December
+//   New Year week:    NEW_YEAR_FIRST_DAY to NEW_YEAR_LAST_DAY of January
+const uint8_t CHRISTMAS_FIRST_DAY = 25;
+const uint8_t CHRISTMAS_LAST_DAY  = 31;
+const uint8_t NEW_YEAR_FIRST_DAY  = 1;
+const uint8_t NEW_YEAR_LAST_DAY   = 7;
 
 // The clock asks the MP3 module how many files each random folder holds.
 // If your module can't answer (startup lists a folder under "No files in"
@@ -175,7 +238,7 @@ struct Schedule {
   uint8_t days;           // DAY_* flags joined with |, or ALL_DAYS
   uint16_t months;        // MONTH_* flags joined with |, or ALL_MONTHS
   SongType songType;      // SONG_NONE = announcement + the song set for that time in the menu
-  uint8_t songNumber;     // SONG_TRACK: file number in Custom_songs. SONG_FOLDER: Custom_songs sub-folder 1-13
+  uint8_t songNumber;     // SONG_TRACK: file number in Custom_songs. SONG_FOLDER: Custom_songs sub-folder 1-9
   bool enabled;           // turned ON/OFF on the LCD or the phone
 };
 
@@ -250,8 +313,6 @@ struct TimeChoice { bool teller, happy, sunday, blessing; };
 enum BulkAction : uint8_t { BULK_ALL_ON, BULK_ALL_OFF, BULK_EVERY_HOUR, BULK_COUNT };
 const char* const BULK_NAMES[BULK_COUNT] = { "All ON", "All OFF", "Every hour" };
 
-enum InputEvent : uint8_t { EV_NONE, EV_LEFT, EV_RIGHT, EV_BACK, EV_SET, EV_SET_LONG, EV_TEST };
-
 struct Button {
   uint8_t pin;
   InputEvent event;
@@ -280,15 +341,20 @@ enum Screen : uint8_t {
 enum MenuItem : uint8_t {
   MENU_DATE_TIME, MENU_PROGRAM, MENU_TELLER_TIMES, MENU_HAPPY_SONGS, MENU_SUNDAY_SONGS,
   MENU_BLESSING_TIMES, MENU_SUNDAY_SILENCE, MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES,
-  MENU_SCHEDULES, MENU_SPEAKER, MENU_MORNING_VOLUME, MENU_EVENING_VOLUME, MENU_LANGUAGE,
-  MENU_PHONE, MENU_COUNT
+  MENU_SCHEDULES, MENU_SPEAKER, MENU_MP3_RELAY, MENU_MORNING_VOLUME, MENU_EVENING_VOLUME,
+  MENU_LANGUAGE, MENU_PHONE, MENU_PASSWORDS, MENU_COUNT
 };
 
 const char* const MENU_NAMES[MENU_COUNT] = {
   "Date & Time", "Program", "Teller Times", "Happy Songs", "Sunday Songs",
   "Blessing Times", "Sunday Silence", "Monthly Songs", "Church Name", "Extra Quotes",
-  "Schedule Songs", "Speaker Output", "Morning Volume", "Evening Volume", "Language",
-  "Phone Settings"
+  "Schedule Songs", "Speaker Output", "MP3 Player Relay", "Morning Volume", "Evening Volume",
+  "Language", "Phone Settings", "Web Passwords"
+};
+
+// Season based songs, as bits of Settings::seasons
+enum Season : uint8_t {
+  SEASON_GOOD_FRIDAY = 1, SEASON_EASTER = 2, SEASON_CHRISTMAS = 4, SEASON_NEW_YEAR = 8, ALL_SEASONS = 15
 };
 const char* const MONTH_NAMES[12] = {
   "January", "February", "March", "April", "May", "June",
@@ -316,6 +382,10 @@ struct Settings {
   bool showPhone;         // show the mobile number on the LCD at startup (phone page only)
   char phone[17];         // mobile number shown at startup (16 characters fit the LCD)
   char startName[17];     // name shown at startup after the number; empty = not shown
+  bool mp3Relay;          // MP3 Player Relay: ON except while the time teller plays
+  uint8_t seasons;        // Season bits: which season based songs are ON (phone page only)
+  char adminPassword[17]; // settings page logins (phone page, admin only)
+  char userPassword[17];
 };
 
 struct Clip {
@@ -445,7 +515,7 @@ uint8_t langFolder(uint8_t folder) {
   return settings.language * LANGUAGE_FOLDERS + folder;
 }
 
-// SD card folder of Custom_songs sub-folder 1-13 in the selected language, or 0
+// SD card folder of Custom_songs sub-folder 1-9 in the selected language, or 0
 uint8_t customFolder(uint8_t number) {
   if (number < 1 || number > MAX_CUSTOM_FOLDERS) return 0;
   return langFolder(FOLDER_FIRST_CUSTOM + number - 1);
@@ -507,6 +577,12 @@ void loadSettings() {
   settings.showPhone     = prefs.getBool("showPhone", true);
   snprintf(settings.phone, sizeof(settings.phone), "%s", prefs.getString("phone", DEFAULT_PHONE).c_str());
   snprintf(settings.startName, sizeof(settings.startName), "%s", prefs.getString("startName", DEFAULT_START_NAME).c_str());
+  settings.mp3Relay      = prefs.getBool("mp3Relay", false);
+  settings.seasons       = prefs.getUChar("seasons", ALL_SEASONS) & ALL_SEASONS;
+  snprintf(settings.adminPassword, sizeof(settings.adminPassword), "%s", prefs.getString("adminPw", DEFAULT_ADMIN_PASSWORD).c_str());
+  snprintf(settings.userPassword, sizeof(settings.userPassword), "%s", prefs.getString("userPw", DEFAULT_USER_PASSWORD).c_str());
+  if (!settings.adminPassword[0]) snprintf(settings.adminPassword, sizeof(settings.adminPassword), "%s", DEFAULT_ADMIN_PASSWORD);
+  if (!settings.userPassword[0]) snprintf(settings.userPassword, sizeof(settings.userPassword), "%s", DEFAULT_USER_PASSWORD);
   prefs.end();
 }
 
@@ -531,6 +607,10 @@ void saveSettings() {
   prefs.putBool("showPhone", settings.showPhone);
   prefs.putString("phone", settings.phone);
   prefs.putString("startName", settings.startName);
+  prefs.putBool("mp3Relay", settings.mp3Relay);
+  prefs.putUChar("seasons", settings.seasons);
+  prefs.putString("adminPw", settings.adminPassword);
+  prefs.putString("userPw", settings.userPassword);
   prefs.end();
   Serial.println("Settings saved.");
 }
@@ -557,8 +637,14 @@ void loadSchedules() {
   }
   for (Schedule& s : schedules) {
     s.name[sizeof(s.name) - 1] = '\0';
-    // Older versions stored the SD card folder 20-99; now it is the sub-folder 1-13
+    // Older versions stored the SD card folder 20-99; now it is the sub-folder 1-9
     if (s.songType == SONG_FOLDER && s.songNumber >= 20) s.songNumber -= 19;
+    // Sub-folders 10-13 no longer exist (their SD folders are now the season songs)
+    if (s.songType == SONG_FOLDER && s.songNumber > MAX_CUSTOM_FOLDERS) {
+      Serial.printf("Schedule %s: sub-folder %d no longer exists, custom song removed\n", s.name, s.songNumber);
+      s.songType = SONG_NONE;
+      s.songNumber = 0;
+    }
   }
 }
 
@@ -578,6 +664,18 @@ void saveSchedules() {
 
 void setRelay(bool on) {
   digitalWrite(PIN_RELAY, on ? RELAY_ON_LEVEL : !RELAY_ON_LEVEL);
+}
+
+// MP3 Player Relay: ON when the feature is ON and the time teller is not playing.
+// Called whenever either of those changes (and from loop(), to be safe).
+int8_t mp3RelayState = -1;  // last level written: -1 = not yet, 0 = OFF, 1 = ON
+
+void updateMp3Relay() {
+  bool on = settings.mp3Relay && isPlayerIdle();
+  if (on == mp3RelayState) return;
+  digitalWrite(PIN_MP3_RELAY, on ? MP3_RELAY_ON_LEVEL : !MP3_RELAY_ON_LEVEL);
+  if (mp3RelayState >= 0) Serial.printf("MP3 Player Relay %s\n", on ? "ON" : "OFF");
+  mp3RelayState = on;
 }
 
 void updateStatusLed() {
@@ -621,15 +719,45 @@ const uint8_t MATRIX_ROWS[2] = { PIN_MATRIX_L1, PIN_MATRIX_L2 };
 const uint8_t MATRIX_COLS[2] = { PIN_MATRIX_R1, PIN_MATRIX_R2 };
 
 void setupButtons() {
-  if (BUTTONS_MATRIX) {
+  if (matrix_keys) {
     // Rows rest as inputs (not driven HIGH), so pressing two buttons at once can't short
     // a HIGH row to a LOW row. Each row is driven LOW only while it is being read.
     for (uint8_t row : MATRIX_ROWS) pinMode(row, INPUT);
     for (uint8_t col : MATRIX_COLS) pinMode(col, INPUT_PULLUP);
     pinMode(PIN_BTN_TEST, INPUT_PULLUP);
-  } else {
+  } else if (resistor_based_key) {
+    pinMode(PIN_KEYS_ANALOG, INPUT);  // the 10k pull-up to 3.3V is outside the ESP32
+    analogSetPinAttenuation(PIN_KEYS_ANALOG, ADC_11db);  // reads up to about 2.5 V
+    pinMode(PIN_BTN_TEST, INPUT_PULLUP);
+  } else {  // normal_button
     for (Button& b : buttons) pinMode(b.pin, INPUT_PULLUP);
   }
+}
+
+// Resistor keys: which key the voltage on PIN_KEYS_ANALOG belongs to, or EV_NONE.
+// A voltage between two keys (the moment of pressing, or noise) is no key; the
+// debounce in readButtons() then waits until the reading is steady.
+InputEvent scanResistorKeys() {
+  static const char* const NAMES[] = { "", "LEFT", "RIGHT", "BACK", "SET" };
+  static InputEvent last = EV_NONE;
+  static uint32_t lastPrintMs = 0;
+  uint32_t sum = 0;
+  for (uint8_t i = 0; i < 4; i++) sum += analogReadMilliVolts(PIN_KEYS_ANALOG);
+  uint16_t mv = sum / 4;
+  InputEvent key = EV_NONE;
+  if (mv <= RESISTOR_NO_KEY_MV) {
+    for (const ResistorKey& k : RESISTOR_KEYS) {
+      if (abs((int)mv - (int)k.millivolts) <= RESISTOR_KEY_TOLERANCE_MV) key = k.event;
+    }
+    // The Serial Monitor shows the voltage of each key, to set RESISTOR_KEYS for other resistors
+    if (key == EV_NONE && millis() - lastPrintMs > 500) {
+      lastPrintMs = millis();
+      Serial.printf("Key %u mV: matches no key in RESISTOR_KEYS\n", mv);
+    }
+  }
+  if (key != last && key != EV_NONE) Serial.printf("Key %s %u mV\n", key <= EV_SET ? NAMES[key] : "?", mv);
+  last = key;
+  return key;
 }
 
 // Reads the whole matrix: bit k is set while MATRIX_KEYS[k] is held down
@@ -647,21 +775,25 @@ uint8_t scanMatrix() {
   return down;
 }
 
-bool buttonIsDown(const Button& b, uint8_t matrixDown) {
-  if (BUTTONS_MATRIX) {
+bool buttonIsDown(const Button& b, uint8_t matrixDown, InputEvent resistorKey) {
+  if (b.event == EV_TEST) return digitalRead(PIN_BTN_TEST) == LOW;  // a separate button with every key type
+  if (matrix_keys) {
     for (uint8_t k = 0; k < 4; k++) {
       if (MATRIX_KEYS[k] == b.event) return matrixDown & (1 << k);
     }
+    return false;
   }
-  return digitalRead(b.pin) == LOW;  // separate buttons, and TEST in both modes
+  if (resistor_based_key) return resistorKey == b.event;
+  return digitalRead(b.pin) == LOW;  // normal_button
 }
 
 // Returns one event per call: a press, an auto-repeat, or a SET long-press
 InputEvent readButtons() {
   uint32_t ms = millis();
-  uint8_t matrixDown = BUTTONS_MATRIX ? scanMatrix() : 0;
+  uint8_t matrixDown = matrix_keys ? scanMatrix() : 0;
+  InputEvent resistorKey = resistor_based_key ? scanResistorKeys() : EV_NONE;
   for (Button& b : buttons) {
-    bool reading = buttonIsDown(b, matrixDown);
+    bool reading = buttonIsDown(b, matrixDown, resistorKey);
     if (reading != b.raw) {
       b.raw = reading;
       b.rawChangedAt = ms;
@@ -798,7 +930,8 @@ void countAllFolders() {
   const uint8_t randomFolders[] = {
     FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_DONGLE, FOLDER_CHURCH_NAME, FOLDER_BLESSING,
     FOLDER_QUOTES, FOLDER_EXTRA_QUOTES, FOLDER_HAPPY_EARLY, FOLDER_HAPPY_MORNING,
-    FOLDER_HAPPY_EVENING, FOLDER_HAPPY_NIGHT, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
+    FOLDER_HAPPY_EVENING, FOLDER_HAPPY_NIGHT, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS,
+    FOLDER_GOOD_FRIDAY, FOLDER_EASTER, FOLDER_CHRISTMAS, FOLDER_NEW_YEAR
   };
   memset(folderCounts, 0, sizeof(folderCounts));
   memset(folderCounted, 0, sizeof(folderCounted));
@@ -876,6 +1009,7 @@ void playCurrentClip() {
 void finishPlaylist() {
   setRelay(false);
   playerState = PLAYER_IDLE;
+  updateMp3Relay();  // the outside MP3 player comes back on
   playlistClear();
   if (playingLabel) {
     playingLabel = nullptr;
@@ -906,10 +1040,12 @@ void startPlaylist() {
   mp3.volume(volume * 3);  // settings are 0-10, the module uses 0-30
   Serial.printf("Volume set to %d/10\n", volume);
   playlistPos = 0;
-  if (settings.speakerOutput) {
-    setRelay(true);
-    playerState = PLAYER_POWER_ON;
-    playerTimer = millis();
+  bool mp3RelayWasOn = mp3RelayState == 1;
+  if (settings.speakerOutput) setRelay(true);
+  playerState = PLAYER_POWER_ON;
+  updateMp3Relay();  // the outside MP3 player goes off while the time teller plays
+  if (settings.speakerOutput || mp3RelayWasOn) {
+    playerTimer = millis();  // wait RELAY_ON_DELAY_MS for the relays to switch
   } else {
     playCurrentClip();
   }
@@ -967,15 +1103,50 @@ uint8_t happyFolderFor(uint8_t hour) {
   return FOLDER_HAPPY_NIGHT;                   // 6 PM - 12 AM
 }
 
-// SD card folder of the song after the announcement: monthly song, else Sunday song,
-// else happy song, as the active Program sets them for this minute. A folder with no
-// files is skipped and the next one is used. Returns 0 for no song.
+// Easter Sunday (Western / Gregorian date) of a year, by the Anonymous Gregorian algorithm
+DateTime easterSunday(int y) {
+  int a = y % 19, b = y / 100, c = y % 100, d = b / 4, e = b % 4;
+  int f = (b + 8) / 25, g = (b - f + 1) / 3;
+  int h = (19 * a + b - d - g + 15) % 30;
+  int i = c / 4, k = c % 4;
+  int l = (32 + 2 * e + 2 * i - h - k) % 7;
+  int m = (a + 11 * h + 22 * l) / 451;
+  int month = (h + l - 7 * m + 114) / 31;
+  int day = (h + l - 7 * m + 114) % 31 + 1;
+  return DateTime(y, month, day);
+}
+
+// Folder (inside a language block) of the season song for this date, or 0 when
+// the date is in no season that is turned ON
+uint8_t seasonFolderFor(const DateTime& t) {
+  uint8_t on = settings.seasons;
+  if ((on & SEASON_CHRISTMAS) && t.month() == 12 && t.day() >= CHRISTMAS_FIRST_DAY && t.day() <= CHRISTMAS_LAST_DAY) {
+    return FOLDER_CHRISTMAS;
+  }
+  if ((on & SEASON_NEW_YEAR) && t.month() == 1 && t.day() >= NEW_YEAR_FIRST_DAY && t.day() <= NEW_YEAR_LAST_DAY) {
+    return FOLDER_NEW_YEAR;
+  }
+  if (on & (SEASON_EASTER | SEASON_GOOD_FRIDAY)) {
+    int32_t fromEaster = (DateTime(t.year(), t.month(), t.day()) - easterSunday(t.year())).days();
+    if ((on & SEASON_EASTER) && fromEaster == 0) return FOLDER_EASTER;
+    if ((on & SEASON_GOOD_FRIDAY) && fromEaster >= -7 && fromEaster <= -1) return FOLDER_GOOD_FRIDAY;  // Palm Sunday - Holy Saturday
+  }
+  return 0;
+}
+
+// SD card folder of the song after the announcement: the season song, else monthly
+// song, else Sunday song, else happy song, as the active Program sets them for this
+// minute. A folder with no files is skipped and the next one is used. Returns 0 for no song.
 uint8_t chooseSongFolder(const DateTime& t, const TimeChoice& c) {
-  bool monthly = (c.happy || c.sunday) && (settings.monthlySongs & (1 << (t.month() - 1)));
+  bool songTime = c.happy || c.sunday;
+  bool monthly = songTime && (settings.monthlySongs & (1 << (t.month() - 1)));
+  uint8_t season = songTime ? seasonFolderFor(t) : 0;
+  uint8_t seasonFolder = season ? langFolder(season) : 0;
   uint8_t monthlyFolder = langFolder(FOLDER_MONTHLY_SONGS);
   uint8_t sundayFolder = langFolder(FOLDER_SUNDAY_SONGS);
   uint8_t happyFolder = langFolder(happyFolderFor(t.hour()));
 
+  if (seasonFolder && folderCounts[seasonFolder] > 0) return seasonFolder;
   if (monthly && folderCounts[monthlyFolder] > 0) return monthlyFolder;
   if (c.sunday && folderCounts[sundayFolder] > 0) return sundayFolder;
   if (c.happy && folderCounts[happyFolder] > 0) return happyFolder;
@@ -1015,7 +1186,7 @@ void playAnnouncement(const DateTime& t, int scheduleIndex) {
   playlistAddRandom(langFolder(FOLDER_QUOTES), nullptr);
   if (settings.extraQuotes) playlistAddRandom(langFolder(FOLDER_EXTRA_QUOTES), nullptr);
 
-  // The song set for this time (monthly, Sunday or happy), then the schedule's custom song
+  // The song set for this time (season, monthly, Sunday or happy), then the schedule's custom song
   uint8_t songFolder = chooseSongFolder(t, c);
   if (songFolder) {
     Serial.printf("Song from folder %02d\n", songFolder);
@@ -1133,6 +1304,9 @@ void drawMenu() {
       break;
     case MENU_SPEAKER:
       snprintf(line1, sizeof(line1), "Status: %s", settings.speakerOutput ? "ON" : "OFF");
+      break;
+    case MENU_MP3_RELAY:
+      snprintf(line1, sizeof(line1), "Status: %s", settings.mp3Relay ? "ON" : "OFF");
       break;
     case MENU_MORNING_VOLUME:
       snprintf(line1, sizeof(line1), "Value: %d", settings.morningVolume);
@@ -1353,9 +1527,20 @@ void handleMenuEvent(InputEvent ev) {
           showMessageFor(line0, line1, SCREEN_MENU, INFO_MESSAGE_MS);
           return;
         }
+        case MENU_PASSWORDS: {  // the settings page logins, in case one is forgotten
+          char line0[17], line1[17];
+          snprintf(line0, sizeof(line0), "Admin %s", settings.adminPassword);
+          snprintf(line1, sizeof(line1), "User %s", settings.userPassword);
+          showMessageFor(line0, line1, SCREEN_MENU, INFO_MESSAGE_MS);
+          return;
+        }
         case MENU_CHURCH_NAME:    settings.churchName = !settings.churchName; break;
         case MENU_EXTRA_QUOTES:   settings.extraQuotes = !settings.extraQuotes; break;
         case MENU_SPEAKER:        settings.speakerOutput = !settings.speakerOutput; break;
+        case MENU_MP3_RELAY:
+          settings.mp3Relay = !settings.mp3Relay;
+          updateMp3Relay();  // at once (if nothing is playing)
+          break;
         case MENU_MORNING_VOLUME: settings.morningVolume = (settings.morningVolume + 1) % 11; break;  // cycle 0-10
         case MENU_EVENING_VOLUME: settings.eveningVolume = (settings.eveningVolume + 1) % 11; break;
         case MENU_PROGRAM:        settings.program = (settings.program + 1) % PROGRAM_COUNT; break;
@@ -1532,6 +1717,8 @@ void setup() {
 
   pinMode(PIN_RELAY, OUTPUT);
   setRelay(false);
+  pinMode(PIN_MP3_RELAY, OUTPUT);
+  digitalWrite(PIN_MP3_RELAY, !MP3_RELAY_ON_LEVEL);  // OFF until the settings are loaded
   pinMode(PIN_LED_STATUS, OUTPUT);
   digitalWrite(PIN_LED_STATUS, LOW);
   pinMode(PIN_MP3_BUSY, INPUT_PULLUP);
@@ -1544,6 +1731,7 @@ void setup() {
   Serial.println("Loading settings...");
   loadSettings();
   loadSchedules();
+  updateMp3Relay();  // the outside MP3 player can play while the clock starts
   showStartupScreens();
   lcdPrintLine(0, "Time Teller");
   lcdPrintLine(1, "Starting...");
@@ -1607,6 +1795,7 @@ void loop() {
   InputEvent ev = readButtons();
   if (ev != EV_NONE) handleEvent(ev);
   updatePlayer();
+  updateMp3Relay();
   updateMessage();
   updateStatusLed();
   webLoop();

@@ -2,7 +2,7 @@
 
 The MP3 module can only play a file by folder number and file number (for
 example 03/025.mp3), not by name. This script copies the audio folders
-(Audio-files/Language_1, Language_2, Language_3) into that layout and writes
+(Audio-files-for-esp32-new/Language_1, Language_2, Language_3) into that layout and writes
 track-list.txt, which shows which original file became which number.
 
 Each language gets a block of 33 folders: Language_1 = 01-33, Language_2 = 34-66,
@@ -13,7 +13,7 @@ Usage:
     python prepare_sd_card.py [<Audio-files folder> [<SD card or output folder>]] [--overwrite]
 
 Example (Windows, SD card is drive E:):
-    python prepare_sd_card.py ..\\Audio-files E:\\
+    python prepare_sd_card.py ..\\Audio-files-for-esp32-new E:\\
 
 If the folders are not given on the command line, DEFAULT_SOURCE and
 DEFAULT_DEST below are used, so you can just run:
@@ -28,7 +28,7 @@ from pathlib import Path
 
 # Used when source / dest are not given on the command line.
 # A relative path here is relative to this script's folder, not the current directory.
-DEFAULT_SOURCE = r"C:\Users\gokul\Documents\projects\time-teller-clock\time-teller-clock\Audio-files"
+DEFAULT_SOURCE = r"C:\Users\gokul\Documents\projects\time-teller-clock\time-teller-clock\Audio-files-for-esp32-new"
 DEFAULT_DEST = "E:\\"
 
 MAX_FILES_PER_FOLDER = 255
@@ -41,11 +41,12 @@ DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "satur
 FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_TIME, FOLDER_DATE, FOLDER_MONTH, FOLDER_DAY = 1, 2, 3, 4, 5, 6
 FOLDER_CHURCH_NAME, FOLDER_QUOTES, FOLDER_EXTRA_QUOTES = 7, 8, 9
 FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS = 10, 11, 12, 13
-FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 21
+FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 25
 FOLDER_YEAR, FOLDER_DONGLE, FOLDER_BLESSING = 16, 17, 18
 FOLDER_HAPPY_EARLY, FOLDER_HAPPY_NIGHT = 19, 20
+FOLDER_GOOD_FRIDAY, FOLDER_EASTER, FOLDER_CHRISTMAS, FOLDER_NEW_YEAR = 21, 22, 23, 24
 LANGUAGE_COUNT, LANGUAGE_FOLDERS = 3, 33   # Language_N uses folders (N-1)*33 + 1 ... N*33
-MAX_CUSTOM_FOLDERS = LANGUAGE_FOLDERS - FIRST_CUSTOM_FOLDER + 1  # 13 Custom_songs sub-folders
+MAX_CUSTOM_FOLDERS = LANGUAGE_FOLDERS - FIRST_CUSTOM_FOLDER + 1  # 9 Custom_songs sub-folders
 
 TIME_RE = re.compile(r"^time-(\d{1,2}) (\d{2}) (AM|PM)\.mp3$", re.IGNORECASE)
 DATE_RE = re.compile(r"^date-(\d{1,2})\.mp3$", re.IGNORECASE)
@@ -194,6 +195,14 @@ def copy_language(builder, src, base, lang):
                           f"{lang}/happy_songs_night (random, 6 PM - 12 AM)")
     builder.copy_in_order(base + FOLDER_SUNDAY_SONGS, mp3_files(src / "sunday_songs"), f"{lang}/sunday_songs (random)")
     builder.copy_in_order(base + FOLDER_MONTHLY_SONGS, mp3_files(src / "monthly_songs"), f"{lang}/monthly_songs (random)")
+    builder.copy_in_order(base + FOLDER_GOOD_FRIDAY, mp3_files(src / "good_friday"),
+                          f"{lang}/good_friday (random, Palm Sunday - Holy Saturday)")
+    builder.copy_in_order(base + FOLDER_EASTER, mp3_files(src / "easter_sunday"),
+                          f"{lang}/easter_sunday (random, Easter Sunday)")
+    builder.copy_in_order(base + FOLDER_CHRISTMAS, mp3_files(src / "christmas"),
+                          f"{lang}/christmas (random, 25-31 December)")
+    builder.copy_in_order(base + FOLDER_NEW_YEAR, mp3_files(src / "new_year"),
+                          f"{lang}/new_year (random, 1-7 January)")
 
     custom_dir = src / "Custom_songs"
     custom_files = mp3_files(custom_dir)
@@ -216,7 +225,7 @@ def copy_language(builder, src, base, lang):
 def main():
     parser = argparse.ArgumentParser(description="Copy Audio-files into the numbered layout for the MP3-TF-16P module.")
     parser.add_argument("source", type=Path, nargs="?",
-                        help=f"the Audio-files folder from the Pi project (default: {DEFAULT_SOURCE})")
+                        help=f"the audio folder with Language_1/2/3 (default: {DEFAULT_SOURCE})")
     parser.add_argument("dest", type=Path, nargs="?",
                         help=f"the SD card root, or a folder to copy to the card later (default: {DEFAULT_DEST})")
     parser.add_argument("--overwrite", action="store_true",

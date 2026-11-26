@@ -7,7 +7,7 @@ This folder has the same church time-teller clock as the Raspberry Pi program, r
 | [esp32-time-teller-clock.ino](esp32-time-teller-clock.ino) | The Arduino program |
 | [web_settings.ino](web_settings.ino) | The phone settings page: Wi-Fi hotspot and web server (opens as a second tab in the Arduino IDE) |
 | [web_page.h](web_page.h) | The settings page itself (HTML, CSS and JavaScript in one file) |
-| [prepare_sd_card.py](prepare_sd_card.py) | Copies `Audio-files/Language_1` … `Language_3` onto the SD card in the numbered layout the MP3 module needs |
+| [prepare_sd_card.py](prepare_sd_card.py) | Copies `Audio-files-for-esp32-new/Language_1` … `Language_3` onto the SD card in the numbered layout the MP3 module needs |
 
 The announcements, schedules, LCD menu and buttons work the same way as the Pi version. The main [README](../README.md) describes them. On top of that, every setting can be changed from a phone. See [Setting up from a phone](#setting-up-from-a-phone).
 
@@ -28,7 +28,7 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Changing settings | LCD and keypad | LCD and buttons, **or a phone** over the clock's own Wi-Fi |
 | Schedules | `schedule.json` | Added, edited and deleted on the phone; saved in ESP32 flash |
 | Settings | `settings.json` | ESP32 flash, kept across power cuts |
-| Buttons | 2×2 matrix (4 buttons on 4 pins) | 4 separate buttons, each on its own pin, or the same 2×2 matrix (`BUTTONS_MATRIX`) |
+| Buttons | 2×2 matrix (4 buttons on 4 pins) | Resistor keys (4 buttons on 2 wires), 4 separate buttons, or the same 2×2 matrix. See [Choosing the key type](#choosing-the-key-type) |
 | Status LEDs | "Started" and "Failed" | One LED: steady = running, blinking = problem |
 | Speaker relay | Switches on and off around every clip | Stays on for the whole announcement (no clicks between clips) |
 | LCD clock | Updates once a minute | Updates every second |
@@ -37,7 +37,7 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Morning/evening volume | Uses the system clock; switches at 5 AM and 5 PM | Uses the RTC; the switch times can be changed on the phone |
 | Announcement order | Rhythm, wishing, time, date, month, weekday, church name, quote, extra quote, song | Adds a bell (dongle) before the time, the year after the weekday, and a blessing prayer after the church name (see [Playback order](#playback-order)) |
 
-Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Sunday Silence and the LCD menu. On top of the Pi version, the ESP32 has [three Programs of times, specific minutes](#programs-and-specific-minutes), [three languages](#languages), four happy song periods and Blessing times. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
+Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Sunday Silence and the LCD menu. On top of the Pi version, the ESP32 has [three Programs of times, specific minutes](#programs-and-specific-minutes), [three languages](#languages), four happy song periods, Blessing times, [season based songs](#season-based-songs), the [MP3 Player Relay](#mp3-player-relay) and [admin and user logins](#logins-admin-and-user). The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
 
 > **Updating from the first ESP32 version:** the SD card folder numbers have changed. Build the card again with `prepare_sd_card.py --overwrite`. The new menu settings start at their defaults, which match the old behavior: an announcement and a happy song every 15 minutes.
 
@@ -59,8 +59,8 @@ Every announcement plays these clips one after another. The order is set in `pla
 | 10 | Blessing prayer (at the *Blessing* times) | `18` | Random |
 | 11 | Quote | `08` | Random |
 | 12 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
-| 13 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `19`/`10`/`11`/`20` | Random, or none (see [Which song plays](../README.md#which-song-plays) and [happy song periods](#happy-song-periods)) |
-| 14 | Custom song (schedules with a song only) | `14`, or `21`–`33` | The schedule's file number, or random from its sub-folder |
+| 13 | Song for this time: season, monthly, Sunday or happy song | `21`–`24`, `13`, `12`, or `19`/`10`/`11`/`20` | Random, or none (see [season based songs](#season-based-songs), [Which song plays](../README.md#which-song-plays) and [happy song periods](#happy-song-periods)) |
+| 14 | Custom song (schedules with a song only) | `14`, or `25`–`33` | The schedule's file number, or random from its sub-folder |
 
 A step whose folder or file is missing on the SD card is skipped. A random folder or the bell folder that is empty at startup is skipped at once. A missing numbered file (time, date, month, day, year) is skipped when the MP3 module reports it, or after 2 seconds.
 
@@ -90,7 +90,26 @@ If the folder for that time has no songs, no happy song plays.
 
 ### Languages
 
-`Audio-files/` has one folder per language: `Language_1`, `Language_2` and `Language_3`. Each holds the full set of folders (`Rythem`, `Time`, `Date`, …, `Custom_songs`). Choose the language under **Language** on the phone page, or with *Language* in the LCD menu. Every clip of the announcement, the songs, the custom songs and the test song then come from that language. After a change, the clock counts that language's files again (on the phone at once, from the LCD when you are back on the home screen).
+`Audio-files-for-esp32-new/` has one folder per language: `Language_1`, `Language_2` and `Language_3`. Each holds the full set of folders (`Rythem`, `Time`, `Date`, …, `Custom_songs`). Choose the language under **Language** on the phone page, or with *Language* in the LCD menu. Every clip of the announcement, the songs, the custom songs and the test song then come from that language. After a change, the clock counts that language's files again (on the phone at once, from the LCD when you are back on the home screen).
+
+### Season based songs
+
+In these seasons the season's song plays instead of the happy, Sunday or monthly song, at the times one of those would play. Each season is turned ON or OFF under **Season based songs** on the phone page (admin only). All four are ON at first.
+
+| Season | Folder | SD folder (Language_1) | Days |
+|--------|--------|------------------------|------|
+| Good Friday week | `good_friday` | `21` | Palm Sunday to Holy Saturday (the 7 days before Easter) |
+| Easter | `easter_sunday` | `22` | Easter Sunday only |
+| Christmas week | `christmas` | `23` | 25 to 31 December |
+| New Year week | `new_year` | `24` | 1 to 7 January |
+
+- The clock works out Easter itself (the Western date used by most churches in India; for 2026 it is 5 April). The page shows this year's Good Friday and Easter dates.
+- The Christmas and New Year days are `CHRISTMAS_FIRST_DAY` … `NEW_YEAR_LAST_DAY` in the sketch's CONFIG section.
+- If a season's folder has no songs, the normal song for that time plays.
+
+### MP3 Player Relay
+
+A second relay, on GPIO 1 (`PIN_MP3_RELAY`), for an outside MP3 player or music system. Turn **MP3 Player Relay** ON on the phone page or in the LCD menu, and the relay is ON. When the time teller starts playing, the relay goes OFF; half a second later the announcement starts. When the announcement (or the test song) ends, the relay goes back ON. With the feature OFF, the relay stays OFF.
 
 ---
 
@@ -102,7 +121,7 @@ The clock makes its own Wi-Fi network, so it doesn't need the church Wi-Fi or th
 
 1. On the phone, open **Wi-Fi** and join **`TimeTeller`**. The Wi-Fi password is **`12345678`**.
 2. Open the browser (Chrome or Safari) and go to **`http://192.168.4.1`**.
-3. Enter the settings password, **`12345678`**. The phone remembers it, so you only type it once.
+3. Tap **Admin** or **User** and enter that password: **`12345678`** for Admin, **`user1234`** for User. The phone remembers the login, so you only type it once. **Log out** is at the top of the page.
 
 If you forget these details, open **Phone Settings** in the LCD menu. It shows the address, and pressing SET shows the Wi-Fi name and password for 5 seconds.
 
@@ -119,15 +138,18 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 | **Play** | **Test song**, **Announce now** (plays the announcement for the current time; the spoken time only exists at :00, :15, :30 and :45), and **Stop** (stops anything that is playing). Also shows what is playing. |
 | **Date & time** | Set the clock to the phone's time with one tap, or type a date and time. The clock's current time is shown at the top of the page. |
 | **Times** | **The clock uses** picks the active Program; the **Program 1/2/3** buttons pick the one to edit (✓ = in use). Four tabs: **Teller** (when announcements play), **Happy songs**, **Sunday songs** and **Blessing**. Each shows all 96 quarter-hours as boxes to tap. Tap an hour's label to switch its four boxes together. The shortcuts are **All ON**, **All OFF**, **Every hour** and **Same as Teller**. A dashed box means a song or blessing is set but Teller is OFF at that time. Below the boxes, **Specific minutes** adds times at any minute. See [Programs and specific minutes](#programs-and-specific-minutes). |
-| **Language** | Language 1, 2 or 3: which `Language_N` folder the audio comes from |
+| **Language** *(admin)* | Language 1, 2 or 3: which `Language_N` folder the audio comes from |
 | **Sunday Silence** | ON/OFF, start and end time |
 | **Monthly Songs** | Tap the months that play monthly songs |
 | **Announcement** | Church name ON/OFF, extra quotes ON/OFF |
+| **MP3 Player Relay** | ON/OFF. See [MP3 Player Relay](#mp3-player-relay). |
+| **Season based songs** *(admin)* | Good Friday week, Easter, Christmas week and New Year week, each ON/OFF. See [Season based songs](#season-based-songs). |
 | **Startup screen** | **Show mobile number** ON/OFF, the **Mobile number** (default `9043172726`), and the **Name** shown after it (default `KAIROSE TECH`; leave it empty to skip it). Up to 16 characters each. Phone-only; shown at the next restart. |
-| **Sound** | Speaker output (relay), morning and evening volume (0–10), and the times the morning and evening volumes start. The start times are phone-only. |
-| **Schedules** | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from `Custom_songs`, or a random song from a `Custom_songs` sub-folder 1–13), taken from the selected language. |
-| **SD card** | Lists each song folder with its number of files. Empty folders are shown in orange. **Rescan SD card** counts them again after you copy new songs, with no restart needed. |
-| **Clock health** | Free memory (and the lowest it has been since the clock started), how long the clock has been running, and why it last started. See [If the Wi-Fi drops](#if-the-wi-fi-drops). |
+| **Sound** *(admin)* | Speaker output (relay), morning and evening volume (0–10), and the times the morning and evening volumes start. The start times are phone-only. |
+| **Schedules** *(admin)* | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from `Custom_songs`, or a random song from a `Custom_songs` sub-folder 1–9), taken from the selected language. |
+| **SD card** *(admin)* | Lists each song folder with its number of files. Empty folders are shown in orange. **Rescan SD card** counts them again after you copy new songs, with no restart needed. |
+| **Clock health** *(admin)* | Free memory (and the lowest it has been since the clock started), how long the clock has been running, and why it last started. See [If the Wi-Fi drops](#if-the-wi-fi-drops). |
+| **Login passwords** *(admin)* | New admin and user passwords. See [Logins](#logins-admin-and-user). |
 
 ### Saving
 
@@ -135,9 +157,22 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 - **Play**, **Stop**, **Set time** and **Rescan** act immediately.
 - The LCD menu and the phone change the same settings. If someone changes something on the LCD while the page is open, reload the page before saving, because a save sends all the settings.
 
-### Passwords
+### Logins: admin and user
 
-The Wi-Fi password (`HOTSPOT_PASSWORD`) and the page password (`WEB_PASSWORD`) are both set in the CONFIG section of the sketch. Each needs at least 8 characters. To change them, edit the sketch and upload it again. Anyone within Wi-Fi range who knows both passwords can change the settings.
+The page has two logins:
+
+| Login | First password | Sees |
+|-------|----------------|------|
+| **Admin** | `12345678` | Everything |
+| **User** | `user1234` | Everything except Sound, Language, Season based songs, Schedules, SD card, Clock health and Login passwords |
+
+The clock checks the login on every request, not just the page: a user login can't save those settings, the schedules or the passwords, and isn't sent the schedules, SD card folders or clock health.
+
+- The admin changes both passwords under **Login passwords** on the page (4–16 characters, no spaces). They are saved in the clock and kept after a restart.
+- If a password is forgotten, open **Web Passwords** in the LCD menu and press SET: it shows both for 5 seconds. Anyone at the clock can already change every setting from the LCD, so this gives nothing away.
+- The first passwords are `DEFAULT_ADMIN_PASSWORD` and `DEFAULT_USER_PASSWORD` in the CONFIG section. Changing them there only matters before the first start; after that, the saved passwords are used.
+
+The Wi-Fi password (`HOTSPOT_PASSWORD`) is set in the CONFIG section and needs at least 8 characters. To change it, edit the sketch and upload it again.
 
 ---
 
@@ -149,8 +184,9 @@ The Wi-Fi password (`HOTSPOT_PASSWORD`) and the page password (`WEB_PASSWORD`) a
 | MP3-TF-16P module + micro-SD card | FAT32, 32 GB or smaller |
 | 16×2 I²C LCD (PCF8574 backpack) | Address `0x27` (sometimes `0x3F`) |
 | PCF8563 RTC module with coin cell | The same RTC as the Pi version |
-| 5 push buttons | LEFT, RIGHT, BACK, SET, TEST. Or a 2×2 matrix keypad for the first four, plus one TEST button (see [Using a 2×2 matrix keypad](#using-a-22-matrix-keypad)) |
+| 5 push buttons | LEFT, RIGHT, BACK, SET, TEST. For resistor keys (the default): 4 resistors, 1.8k, 4.3k, 8.2k and 15k, plus a 10k pull-up. See [Choosing the key type](#choosing-the-key-type) |
 | Relay module *(optional)* | Switches the amplifier or speaker power |
+| Second relay module *(optional)* | The [MP3 Player Relay](#mp3-player-relay) for an outside MP3 player |
 | 1 LED + 330 Ω resistor | Status LED |
 | 1 kΩ resistor | Between the ESP32 TX pin and the MP3 module RX pin |
 | 100–470 µF capacitor | Across the MP3 module's VCC and GND; reduces hum and resets |
@@ -170,12 +206,10 @@ All the pin numbers are set at the top of the sketch, so you can change them.
 | MP3 module **TX** | GPIO 5 (ESP32 RX) | |
 | MP3 module **RX** | GPIO 6 (ESP32 TX) | **Through a 1 kΩ resistor** |
 | MP3 module **BUSY** | GPIO 7 | LOW while playing; tells the ESP32 when a clip ends |
-| LEFT button | GPIO 0 | Connect each button between its pin and GND |
-| RIGHT button | GPIO 1 | |
-| BACK button | GPIO 3 | |
-| SET button | GPIO 4 | |
-| TEST button | GPIO 20 | Plays the test song |
+| Resistor keys (LEFT, RIGHT, BACK, SET) | GPIO 0 | See [Using resistor keys](#using-resistor-keys). For the other key types, see [Choosing the key type](#choosing-the-key-type). |
+| TEST button | GPIO 20 | Between the pin and GND. Plays the test song |
 | Relay IN | GPIO 10 | HIGH = on. Set `RELAY_ON_LEVEL` to `LOW` for active-low relay boards. |
+| MP3 Player Relay IN | GPIO 1 | HIGH = on. Set `MP3_RELAY_ON_LEVEL` to `LOW` for active-low relay boards. |
 | Status LED (+ 330 Ω) | GPIO 21 | Other end to GND |
 | MP3 module VCC | 5 V | |
 | RTC VCC | 3.3 V | |
@@ -185,9 +219,37 @@ GPIO 2 is left free on purpose. It is a boot "strapping" pin, like GPIO 8 and GP
 
 > **The LCD and 5 V.** ESP32-C3 pins are **not 5 V tolerant**. Most PCF8574 LCD backpacks run at 5 V and pull SDA/SCL up to 5 V. Either put an I²C level shifter between the backpack and the ESP32, or use a 3.3 V LCD.
 
+### Choosing the key type
+
+The LEFT, RIGHT, BACK and SET buttons can be wired three ways. Set **exactly one** of these to `true` in the sketch's CONFIG section (the sketch won't compile otherwise):
+
+| Setting | Wiring | Pins |
+|---------|--------|------|
+| `resistor_based_key` *(default)* | 4 buttons on 2 wires, each through its own resistor | GPIO 0 (`PIN_KEYS_ANALOG`) and GND |
+| `matrix_keys` | 2×2 matrix keypad, like the Pi version | GPIO 0, 1, 3, 4 |
+| `normal_button` | 4 separate buttons, each between its pin and GND | LEFT GPIO 0, RIGHT GPIO 1, BACK GPIO 3, SET GPIO 4 |
+
+The TEST button is a separate button on GPIO 20 with all three. With `matrix_keys` or `normal_button`, GPIO 1 is a key pin, so move the MP3 Player Relay (`PIN_MP3_RELAY`) to another free pin: the build stops with a message until you do.
+
+### Using resistor keys
+
+Each button connects GPIO 0 to GND through its own resistor, and a **10 kΩ resistor goes from GPIO 0 to 3.3 V** on the ESP32 side. Pressing a button then puts its own voltage on the pin:
+
+| Button | Resistor to GND | Voltage | Setting |
+|--------|-----------------|---------|---------|
+| LEFT | 1.8 kΩ | 0.5 V | `RESISTOR_KEYS` |
+| RIGHT | 4.3 kΩ | 1.0 V | |
+| BACK | 8.2 kΩ | 1.5 V | |
+| SET | 15 kΩ | 2.0 V | |
+| *(none pressed)* | | 3.3 V | |
+
+The steps are 0.5 V rather than 1 V because the ESP32-C3 reads voltages only up to about 2.5 V; 1 V steps would leave room for just two buttons. A reading within 0.2 V (`RESISTOR_KEY_TOLERANCE_MV`) of a button's voltage is that button.
+
+**With other resistors**, or a ready-made resistor keypad: open the Serial Monitor and press each button. It prints `Key LEFT 512 mV` for a recognised button, or `Key 1240 mV: matches no key` for a voltage it doesn't know. Write the voltages you see into `RESISTOR_KEYS`. Pressing two buttons at once gives a different voltage, so press one at a time.
+
 ### Using a 2×2 matrix keypad
 
-The LEFT, RIGHT, BACK and SET buttons can also be a 2×2 matrix keypad, like the Pi version uses. Set `BUTTONS_MATRIX = true` in the sketch's CONFIG section and wire the keypad's four lines to the same four pins:
+Set `matrix_keys = true` (and the other two `false`) and wire the keypad's four lines to these pins:
 
 | Keypad line | ESP32-C3 pin | Setting |
 |-------------|--------------|---------|
@@ -212,10 +274,10 @@ The MP3-TF-16P has two kinds of output:
 ## Preparing the SD card
 
 1. Format the micro-SD card as **FAT32**.
-2. Put your audio into `Audio-files/Language_1`, `Language_2` and `Language_3`. Each language folder has the same sub-folders (`Rythem`, `Wishing`, `Time`, …). A missing language is skipped. An `Audio-files/` folder in the old layout, with no `Language_` folders, is copied as Language 1.
+2. Put your audio into `Audio-files-for-esp32-new/Language_1`, `Language_2` and `Language_3`. Each language folder has the same sub-folders (`Rythem`, `Wishing`, `Time`, …, and the season folders `good_friday`, `easter_sunday`, `christmas`, `new_year`). A missing language or folder is skipped. A folder in the old layout, with no `Language_` folders, is copied as Language 1.
 3. Run the script from this folder. For example, if the SD card is drive `E:`:
    ```bash
-   python prepare_sd_card.py ../Audio-files E:\
+   python prepare_sd_card.py ../Audio-files-for-esp32-new E:\
    ```
    If you run it with no folders given, it uses `DEFAULT_SOURCE` and `DEFAULT_DEST` from the top of the script. The script needs Python 3 and no extra packages. You can also copy to an empty folder first and move it to the card later.
 4. Read the printed list, which is also saved on the card as `track-list.txt`. It shows the number each file received, and it warns about missing or wrongly named files.
@@ -248,9 +310,13 @@ Each language has a block of 33 folders: **Language_1 = `01`–`33`, Language_2 
 | `18` | Blessing_prayer | Random, at the *Blessing* times |
 | `19` | happy_songs_early_morning | Random, for songs from 12 AM to 6 AM |
 | `20` | happy_songs_night | Random, for songs from 6 PM to 12 AM |
-| `21`–`33` | `Custom_songs/` sub-folders 1–13, in name order | Random, for a sub-folder schedule |
+| `21` | good_friday | Random, in Good Friday week |
+| `22` | easter_sunday | Random, on Easter Sunday |
+| `23` | christmas | Random, in Christmas week |
+| `24` | new_year | Random, in New Year week |
+| `25`–`33` | `Custom_songs/` sub-folders 1–9, in name order | Random, for a sub-folder schedule |
 
-Each language can have up to 13 `Custom_songs` sub-folders; the script warns about any more. A schedule's sub-folder number (1–13) and song number mean the same position in every language, so give the folders and files the same names in each language.
+Each language can have up to 9 `Custom_songs` sub-folders; the script warns about any more. (Folders 21–24 used to be sub-folders 1–4; a schedule that used sub-folder 10–13 loses its custom song at the next start, and the Serial Monitor says so.) A schedule's sub-folder number (1–9) and song number mean the same position in every language, so give the folders and files the same names in each language.
 
 At startup the clock asks the module how many files are in each random folder. Any folder with no files is listed on the LCD (`No files in N:` followed by the folder numbers) and then skipped when playing. If you add songs later, tap **Rescan SD card** on the phone page, or restart the clock.
 
@@ -285,8 +351,11 @@ Everything you're likely to change is in the **CONFIG** section at the top of th
 ```cpp
 const char* HOTSPOT_NAME     = "TimeTeller";
 const char* HOTSPOT_PASSWORD = "12345678";  // Wi-Fi password of the hotspot
-const char* WEB_PASSWORD     = "12345678";  // password asked by the settings page
+const char* DEFAULT_ADMIN_PASSWORD = "12345678";  // first admin login of the page
+const char* DEFAULT_USER_PASSWORD  = "user1234";  // first user login of the page
 ```
+
+The page passwords can then be changed on the page. See [Logins](#logins-admin-and-user).
 
 ### Wi-Fi signal
 
@@ -364,7 +433,8 @@ Schedules saved by an older version with a folder number 20–99 are changed to 
 | The phone can't find the `TimeTeller` Wi-Fi | Watch the Serial Monitor at startup. `Hotspot did not start` means a password in CONFIG is shorter than 8 characters. Otherwise stand closer to the clock, or raise `WIFI_TX_POWER` (see [Wi-Fi signal](#wi-fi-signal)). |
 | The phone keeps dropping off the Wi-Fi | See [If the Wi-Fi drops](#if-the-wi-fi-drops) below. |
 | The settings page doesn't open | Type `http://192.168.4.1`, starting with `http://`, not `https://`. On Android, choose *Stay connected* when the phone says there is no internet, or turn off mobile data. |
-| The page keeps asking for the password | The settings password is `WEB_PASSWORD` in the sketch (`12345678` unless you changed it). |
+| The page keeps asking for the password | Check **Admin** or **User** is the right one for the password. The LCD menu *Web Passwords* shows both. |
+| The buttons do nothing, or the wrong button reacts | Check the key type in CONFIG matches the wiring ([Choosing the key type](#choosing-the-key-type)). For resistor keys, check the 10 kΩ pull-up and watch the `Key … mV` lines in the Serial Monitor. |
 | Internet time never works | Check `WIFI_SSID` and `WIFI_PASSWORD`, and that the clock is in range of the church Wi-Fi. If the board is near the edge of its range, raise `WIFI_TX_POWER` a step. |
 | New songs aren't played | Tap **Rescan SD card** on the phone page, or restart the clock. |
 
