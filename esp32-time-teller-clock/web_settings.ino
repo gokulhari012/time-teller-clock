@@ -76,6 +76,37 @@ bool readSlots(const char* name, SlotSet& set) {
   return ok;
 }
 
+// Reads the specific minutes of a Program ("HHMMF" entries joined with commas,
+// empty = none). Answers 400 and returns false if the text is not valid.
+bool readExactTimes(const char* name, Program& p) {
+  String text = server.arg(name);
+  uint8_t count = 0;
+  size_t i = 0;
+  bool ok = true;
+  while (ok && i < text.length()) {
+    ok = count < MAX_EXACT_TIMES && i + 5 <= text.length();
+    for (size_t k = 0; ok && k < 4; k++) ok = isdigit((unsigned char)text[i + k]);
+    if (!ok) break;
+    uint8_t hour = (text[i] - '0') * 10 + (text[i + 1] - '0');
+    uint8_t minute = (text[i + 2] - '0') * 10 + (text[i + 3] - '0');
+    char flag[2] = { text[i + 4], '\0' };
+    ok = hour < 24 && minute < 60 && isxdigit((unsigned char)flag[0]);
+    if (!ok) break;
+    p.exact[count++] = { hour, minute, (uint8_t)(strtol(flag, nullptr, 16) & EXACT_ALL) };
+    i += 5;
+    if (i < text.length()) {
+      ok = text[i] == ',';
+      i++;
+    }
+  }
+  if (!ok) {
+    sendError(400, String("Bad value for ") + name);
+    return false;
+  }
+  p.exactCount = count;
+  return true;
+}
+
 // Keeps only characters the LCD can show and that are safe inside JSON
 void cleanName(const String& text, char* out, size_t size) {
   size_t used = 0;
@@ -106,16 +137,18 @@ void redrawLcdMenu() {
 // block of memory instead of growing (and being copied) many times while it is built.
 const size_t STATUS_JSON_SIZE   = 512;  // the status, with up to about 40 SD card folders
 const size_t SCHEDULE_JSON_SIZE = 80;   // one schedule
+const size_t PROGRAM_JSON_SIZE  = 260;  // one Program: four time lists and 20 specific minutes
+const size_t SETTINGS_JSON_SIZE = 400 + PROGRAM_COUNT * PROGRAM_JSON_SIZE;
 
 void addStatusJson(String& json) {
   char buf[200];
   snprintf(buf, sizeof(buf),
            "{\"time\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"playing\":%d,\"label\":\"%s\",\"mp3\":%d,"
-           "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lu,\"reset\":\"%s\",\"folders\":[",
+           "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lu,\"reset\":\"%s\",\"language\":%d,\"folders\":[",
            rtcNow.year(), rtcNow.month(), rtcNow.day(), rtcNow.hour(), rtcNow.minute(), rtcNow.second(),
            isPlayerIdle() ? 0 : 1, playingLabel ? playingLabel : "", mp3Ok ? 1 : 0,
            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
-           (unsigned long)(esp_timer_get_time() / 1000000), resetReasonText());
+           (unsigned long)(esp_timer_get_time() / 1000000), resetReasonText(), settings.language);
   json += buf;
   bool first = true;
   for (uint8_t folder = 1; folder < 100; folder++) {
@@ -127,17 +160,42 @@ void addStatusJson(String& json) {
   json += "]}";
 }
 
+// Specific minutes as "HHMMF" entries joined with commas (F = ExactFlag bits as one hex digit)
+void exactToText(const Program& p, String& json) {
+  char entry[8];
+  for (uint8_t i = 0; i < p.exactCount; i++) {
+    snprintf(entry, sizeof(entry), "%s%02d%02d%x", i ? "," : "", p.exact[i].hour, p.exact[i].minute, p.exact[i].flags & EXACT_ALL);
+    json += entry;
+  }
+}
+
+// One Program: t, h, s, b = Teller, Happy, Sunday and Blessing quarter-hours; x = specific minutes
+void addProgramJson(String& json, const Program& p) {
+  char teller[25], happy[25], sunday[25], blessing[25], buf[140];
+  slotsToHex(p.tellerTimes, teller);
+  slotsToHex(p.happyTimes, happy);
+  slotsToHex(p.sundayTimes, sunday);
+  slotsToHex(p.blessingTimes, blessing);
+  snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"h\":\"%s\",\"s\":\"%s\",\"b\":\"%s\",\"x\":\"",
+           teller, happy, sunday, blessing);
+  json += buf;
+  exactToText(p, json);
+  json += "\"}";
+}
+
 void addSettingsJson(String& json) {
-  char teller[25], happy[25], sunday[25], buf[520];
-  slotsToHex(settings.tellerTimes, teller);
-  slotsToHex(settings.happyTimes, happy);
-  slotsToHex(settings.sundayTimes, sunday);
+  char buf[440];
+  json += "{\"programs\":[";
+  for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
+    if (i) json += ",";
+    addProgramJson(json, settings.programs[i]);
+  }
   snprintf(buf, sizeof(buf),
-           "{\"teller\":\"%s\",\"happy\":\"%s\",\"sunday\":\"%s\",\"silenceOn\":%d,\"silenceStart\":%d,"
+           "],\"program\":%d,\"language\":%d,\"silenceOn\":%d,\"silenceStart\":%d,"
            "\"silenceEnd\":%d,\"months\":%d,\"churchName\":%d,\"extraQuotes\":%d,\"speaker\":%d,"
            "\"volMorning\":%d,\"volEvening\":%d,\"morningFrom\":%d,\"eveningFrom\":%d,"
            "\"showPhone\":%d,\"phone\":\"%s\",\"startName\":\"%s\"}",
-           teller, happy, sunday, settings.silenceOn, settings.silenceStart, settings.silenceEnd,
+           settings.program, settings.language, settings.silenceOn, settings.silenceStart, settings.silenceEnd,
            settings.monthlySongs, settings.churchName, settings.extraQuotes, settings.speakerOutput,
            settings.morningVolume, settings.eveningVolume, settings.morningFrom, settings.eveningFrom,
            settings.showPhone, settings.phone, settings.startName);
@@ -165,7 +223,7 @@ void sendStatus() {
 
 void sendState() {
   String json;
-  json.reserve(500 + scheduleCount * SCHEDULE_JSON_SIZE + STATUS_JSON_SIZE);  // settings + schedules + status
+  json.reserve(SETTINGS_JSON_SIZE + scheduleCount * SCHEDULE_JSON_SIZE + STATUS_JSON_SIZE);
   json += "{\"settings\":";
   addSettingsJson(json);
   json += ",\"schedules\":";
@@ -199,9 +257,21 @@ void handleSaveSettings() {
   if (!authorized()) return;
   Settings updated = settings;
   long v;
-  if (!readSlots("teller", updated.tellerTimes)) return;
-  if (!readSlots("happy", updated.happyTimes)) return;
-  if (!readSlots("sunday", updated.sundayTimes)) return;
+  // Program i is sent as p<i>t, p<i>h, p<i>s, p<i>b (quarter-hours) and p<i>x (specific minutes)
+  char key[6];
+  const char kinds[] = "thsbx";
+  for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
+    Program& p = updated.programs[i];
+    SlotSet* lists[4] = { &p.tellerTimes, &p.happyTimes, &p.sundayTimes, &p.blessingTimes };
+    for (uint8_t k = 0; k < 5; k++) {
+      snprintf(key, sizeof(key), "p%d%c", i, kinds[k]);
+      if (k < 4 ? !readSlots(key, *lists[k]) : !readExactTimes(key, p)) return;
+    }
+  }
+  if (!readNumber("program", 0, PROGRAM_COUNT - 1, v)) return;
+  updated.program = v;
+  if (!readNumber("language", 0, LANGUAGE_COUNT - 1, v)) return;
+  updated.language = v;
   if (!readNumber("silenceOn", 0, 1, v)) return;
   updated.silenceOn = v;
   if (!readNumber("silenceStart", 0, SLOT_COUNT - 1, v)) return;
@@ -232,9 +302,14 @@ void handleSaveSettings() {
   if (server.hasArg("phone")) cleanName(server.arg("phone"), updated.phone, sizeof(updated.phone));
   if (server.hasArg("startName")) cleanName(server.arg("startName"), updated.startName, sizeof(updated.startName));
 
+  bool languageChanged = updated.language != settings.language;
   settings = updated;
   saveSettings();
   if (!settings.speakerOutput) setRelay(false);
+  if (languageChanged) {
+    languageCountPending = true;
+    if (mp3Ok && isPlayerIdle()) countAllFolders();  // so the answer lists the new language's folders
+  }
   redrawLcdMenu();
   sendState();
 }
@@ -266,9 +341,9 @@ void handleSaveSchedules() {
     snprintf(key, sizeof(key), "t%d", i);
     if (!readNumber(key, SONG_NONE, SONG_FOLDER, v)) return;
     s.songType = (SongType)v;
-    // Song number: a file 1-255 in folder 14, or a folder 20-99
-    long low = s.songType == SONG_FOLDER ? FOLDER_FIRST_CUSTOM : (s.songType == SONG_TRACK ? 1 : 0);
-    long high = s.songType == SONG_FOLDER ? 99 : 255;
+    // Song number: a file 1-255 in Custom_songs, or a Custom_songs sub-folder 1-13
+    long low = s.songType == SONG_NONE ? 0 : 1;
+    long high = s.songType == SONG_FOLDER ? MAX_CUSTOM_FOLDERS : 255;
     snprintf(key, sizeof(key), "k%d", i);
     if (!readNumber(key, low, high, v)) return;
     s.songNumber = s.songType == SONG_NONE ? 0 : v;

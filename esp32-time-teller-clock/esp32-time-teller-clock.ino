@@ -4,13 +4,14 @@
  * Port of time-teller-clock-program.py (Raspberry Pi) to an ESP32-C3 with an
  * MP3-TF-16P (DFPlayer Mini compatible) MP3 module.
  *
- * At the times chosen in the "Teller Times" menu, and at the times of the
- * schedules, it plays:
+ * At the times chosen in the active Program (Teller times and specific minutes),
+ * and at the times of the schedules, it plays:
  *   rhythm -> wishing -> dongle (bell, rung once per hour) -> time -> date
  *   -> month -> day -> year -> church name -> blessing prayer -> quote
  *   -> extra quote -> song
- * The song is a monthly, Sunday or happy song as set in the menu; a schedule's
- * custom song plays after it.
+ * The blessing prayer plays at the Blessing times. The song is a monthly, Sunday
+ * or happy song as set for that time; a schedule's custom song plays after it.
+ * All audio comes from the selected language (Language_1, _2 or _3 on the SD card).
  *
  * Settings can be changed on the LCD, or on a phone: the clock makes its own
  * Wi-Fi hotspot (HOTSPOT_NAME below) and serves a settings page at
@@ -123,6 +124,11 @@ const uint8_t DAILY_RESTART_HOUR   = 3;
 const uint8_t DAILY_RESTART_MINUTE = 55;
 
 // ---- SD card folders (made by prepare_sd_card.py) ----
+// Each language has a block of LANGUAGE_FOLDERS folders: Language_1 = 01-33,
+// Language_2 = 34-66, Language_3 = 67-99. The numbers below are the position
+// inside a block; langFolder() turns them into the SD card folder number.
+const uint8_t LANGUAGE_COUNT       = 3;
+const uint8_t LANGUAGE_FOLDERS     = 33;
 const uint8_t FOLDER_RYTHEM        = 1;   // random file
 const uint8_t FOLDER_WISHING       = 2;   // random file
 const uint8_t FOLDER_TIME          = 3;   // 001-096 = 12:00 AM, 12:15 AM ... 11:45 PM
@@ -132,8 +138,8 @@ const uint8_t FOLDER_DAY           = 6;   // 001-007 = Sunday ... Saturday
 const uint8_t FOLDER_CHURCH_NAME   = 7;   // random file
 const uint8_t FOLDER_QUOTES        = 8;   // random file
 const uint8_t FOLDER_EXTRA_QUOTES  = 9;   // random file
-const uint8_t FOLDER_HAPPY_MORNING = 10;  // random file, for 12 AM to 12 PM
-const uint8_t FOLDER_HAPPY_EVENING = 11;  // random file, for 12 PM to 12 AM
+const uint8_t FOLDER_HAPPY_MORNING = 10;  // random file, for 6 AM to 12 PM
+const uint8_t FOLDER_HAPPY_EVENING = 11;  // random file, for 12 PM to 6 PM
 const uint8_t FOLDER_SUNDAY_SONGS  = 12;  // random file
 const uint8_t FOLDER_MONTHLY_SONGS = 13;  // random file
 const uint8_t FOLDER_CUSTOM        = 14;  // Custom_songs/*.mp3 (SONG_TRACK schedules)
@@ -141,11 +147,15 @@ const uint8_t FOLDER_TEST          = 15;  // 001.mp3 = Testsong.mp3
 const uint8_t FOLDER_YEAR          = 16;  // 001-255 = 2001 ... 2255 (year - 2000)
 const uint8_t FOLDER_DONGLE        = 17;  // 001.mp3 = one bell sound, rung once per hour (12-hour clock)
 const uint8_t FOLDER_BLESSING      = 18;  // random file (blessing prayer)
-const uint8_t FOLDER_FIRST_CUSTOM  = 20;  // folders 20-99 = Custom_songs sub-folders (SONG_FOLDER schedules)
+const uint8_t FOLDER_HAPPY_EARLY   = 19;  // random file, for 12 AM to 6 AM (happy_songs_early_morning)
+const uint8_t FOLDER_HAPPY_NIGHT   = 20;  // random file, for 6 PM to 12 AM (happy_songs_night)
+const uint8_t FOLDER_FIRST_CUSTOM  = 21;  // 21-33 = Custom_songs sub-folders 1-13 (SONG_FOLDER schedules)
+const uint8_t MAX_CUSTOM_FOLDERS   = LANGUAGE_FOLDERS - FOLDER_FIRST_CUSTOM + 1;  // 13
 
 // The clock asks the MP3 module how many files each random folder holds.
 // If your module can't answer (startup lists a folder under "No files in"
 // although it has files), write the counts here and they are used instead.
+// Use the SD card folder number (e.g. 34 = Rythem of Language_2).
 const uint8_t MANUAL_FOLDER_COUNTS[][2] = {
   // { FOLDER_RYTHEM, 25 },
   { 0, 0 }  // end of list - keep this line
@@ -165,7 +175,7 @@ struct Schedule {
   uint8_t days;           // DAY_* flags joined with |, or ALL_DAYS
   uint16_t months;        // MONTH_* flags joined with |, or ALL_MONTHS
   SongType songType;      // SONG_NONE = announcement + the song set for that time in the menu
-  uint8_t songNumber;     // SONG_TRACK: file number in folder 14. SONG_FOLDER: folder number 20-99
+  uint8_t songNumber;     // SONG_TRACK: file number in Custom_songs. SONG_FOLDER: Custom_songs sub-folder 1-13
   bool enabled;           // turned ON/OFF on the LCD or the phone
 };
 
@@ -181,7 +191,7 @@ constexpr uint16_t MONTH_JAN = 1 << 0, MONTH_FEB = 1 << 1, MONTH_MAR = 1 << 2, M
 const Schedule DEFAULT_SCHEDULES[] = {
   // name               hh  mm  days               months                 song         no  enabled
   { "mon_tue_mornings",  6,  5, DAY_MON | DAY_TUE, MONTH_JUN | MONTH_JUL, SONG_TRACK,   1, true },  // Custom_songs/GokulHari.mp3 -> 14/001.mp3
-  { "sunday1",          15, 30, DAY_SUN,           ALL_MONTHS,            SONG_FOLDER, 20, true },  // Custom_songs/new_folder/   -> 20/
+  { "sunday1",          15, 30, DAY_SUN,           ALL_MONTHS,            SONG_FOLDER,  1, true },  // Custom_songs/new_folder/   -> sub-folder 1
   { "sunday",           15, 30, DAY_SUN,           ALL_MONTHS,            SONG_NONE,    0, true },
 };
 static_assert(sizeof(DEFAULT_SCHEDULES) / sizeof(DEFAULT_SCHEDULES[0]) <= MAX_SCHEDULES, "Too many default schedules");
@@ -209,6 +219,33 @@ const uint8_t SLOT_COUNT = 96;  // slot 0 = 12:00 AM, 36 = 9:00 AM, 95 = 11:45 P
 struct SlotSet {
   uint8_t bits[SLOT_COUNT / 8];  // one ON/OFF bit per quarter-hour
 };
+
+// ---- Programs ----
+// Three sets of times (Program 1-3). The clock uses the active one, chosen on
+// the phone or in the LCD menu. Each has four quarter-hour lists and up to
+// MAX_EXACT_TIMES specific minutes (phone only).
+const uint8_t PROGRAM_COUNT   = 3;
+const uint8_t MAX_EXACT_TIMES = 20;
+
+enum ExactFlag : uint8_t { EXACT_TELLER = 1, EXACT_HAPPY = 2, EXACT_SUNDAY = 4, EXACT_BLESSING = 8, EXACT_ALL = 15 };
+
+struct ExactTime {
+  uint8_t hour;    // 0-23
+  uint8_t minute;  // 0-59
+  uint8_t flags;   // ExactFlag values joined with |
+};
+
+struct Program {
+  SlotSet tellerTimes;    // when the time teller runs
+  SlotSet happyTimes;     // announcements followed by a happy song
+  SlotSet sundayTimes;    // announcements followed by a Sunday song (Sundays only)
+  SlotSet blessingTimes;  // announcements with the blessing prayer
+  uint8_t exactCount;
+  ExactTime exact[MAX_EXACT_TIMES];
+};
+
+// What the active Program has set for one minute
+struct TimeChoice { bool teller, happy, sunday, blessing; };
 
 enum BulkAction : uint8_t { BULK_ALL_ON, BULK_ALL_OFF, BULK_EVERY_HOUR, BULK_COUNT };
 const char* const BULK_NAMES[BULK_COUNT] = { "All ON", "All OFF", "Every hour" };
@@ -241,15 +278,17 @@ enum Screen : uint8_t {
 };
 
 enum MenuItem : uint8_t {
-  MENU_DATE_TIME, MENU_TELLER_TIMES, MENU_HAPPY_SONGS, MENU_SUNDAY_SONGS, MENU_SUNDAY_SILENCE,
-  MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES, MENU_SCHEDULES, MENU_SPEAKER,
-  MENU_MORNING_VOLUME, MENU_EVENING_VOLUME, MENU_PHONE, MENU_COUNT
+  MENU_DATE_TIME, MENU_PROGRAM, MENU_TELLER_TIMES, MENU_HAPPY_SONGS, MENU_SUNDAY_SONGS,
+  MENU_BLESSING_TIMES, MENU_SUNDAY_SILENCE, MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES,
+  MENU_SCHEDULES, MENU_SPEAKER, MENU_MORNING_VOLUME, MENU_EVENING_VOLUME, MENU_LANGUAGE,
+  MENU_PHONE, MENU_COUNT
 };
 
 const char* const MENU_NAMES[MENU_COUNT] = {
-  "Date & Time", "Teller Times", "Happy Songs", "Sunday Songs", "Sunday Silence",
-  "Monthly Songs", "Church Name", "Extra Quotes", "Schedule Songs", "Speaker Output",
-  "Morning Volume", "Evening Volume", "Phone Settings"
+  "Date & Time", "Program", "Teller Times", "Happy Songs", "Sunday Songs",
+  "Blessing Times", "Sunday Silence", "Monthly Songs", "Church Name", "Extra Quotes",
+  "Schedule Songs", "Speaker Output", "Morning Volume", "Evening Volume", "Language",
+  "Phone Settings"
 };
 const char* const MONTH_NAMES[12] = {
   "January", "February", "March", "April", "May", "June",
@@ -260,9 +299,9 @@ const char* const MONTH_SHORT[12] = {
 };
 
 struct Settings {
-  SlotSet tellerTimes;    // when the time teller runs
-  SlotSet happyTimes;     // announcements followed by a happy song
-  SlotSet sundayTimes;    // announcements followed by a Sunday song (Sundays only)
+  Program programs[PROGRAM_COUNT];
+  uint8_t program;        // active Program, 0-2
+  uint8_t language;       // 0-2 = Language_1 ... Language_3 on the SD card
   bool silenceOn;         // Sunday Silence: nothing plays on Sunday from silenceStart to silenceEnd
   uint8_t silenceStart;   // quarter-hour slot
   uint8_t silenceEnd;     // quarter-hour slot (not included)
@@ -336,6 +375,7 @@ bool mp3Ok = false;
 uint8_t folderCounts[100] = { 0 };
 bool folderCounted[100] = { false };  // folders whose files have been counted
 bool folderCountPending = false;      // count new schedule folders once nothing is playing
+bool languageCountPending = false;    // the language changed: count its folders once nothing is playing
 
 StatusLed statusLed = STATUS_OFF;
 
@@ -372,6 +412,45 @@ void formatSlot(char* buf, size_t size, uint8_t slot) {
   snprintf(buf, size, "%02d:%02d %s", hour12, (slot % 4) * 15, hour < 12 ? "AM" : "PM");
 }
 
+Program& currentProgram() {
+  return settings.programs[settings.program];
+}
+
+// The active Program's choices for this minute: its quarter-hour lists (at :00,
+// :15, :30 and :45) joined with its specific minutes
+TimeChoice timesAt(const DateTime& t) {
+  const Program& p = currentProgram();
+  TimeChoice c = { false, false, false, false };
+  if (t.minute() % 15 == 0) {
+    uint8_t slot = slotOf(t);
+    c.teller   = slotOn(p.tellerTimes, slot);
+    c.happy    = slotOn(p.happyTimes, slot);
+    c.sunday   = slotOn(p.sundayTimes, slot);
+    c.blessing = slotOn(p.blessingTimes, slot);
+  }
+  for (uint8_t i = 0; i < p.exactCount; i++) {
+    const ExactTime& e = p.exact[i];
+    if (e.hour != t.hour() || e.minute != t.minute()) continue;
+    c.teller   |= (e.flags & EXACT_TELLER) != 0;
+    c.happy    |= (e.flags & EXACT_HAPPY) != 0;
+    c.sunday   |= (e.flags & EXACT_SUNDAY) != 0;
+    c.blessing |= (e.flags & EXACT_BLESSING) != 0;
+  }
+  if (t.dayOfTheWeek() != 0) c.sunday = false;  // Sunday songs only on Sundays
+  return c;
+}
+
+// SD card folder number of a folder in the selected language
+uint8_t langFolder(uint8_t folder) {
+  return settings.language * LANGUAGE_FOLDERS + folder;
+}
+
+// SD card folder of Custom_songs sub-folder 1-13 in the selected language, or 0
+uint8_t customFolder(uint8_t number) {
+  if (number < 1 || number > MAX_CUSTOM_FOLDERS) return 0;
+  return langFolder(FOLDER_FIRST_CUSTOM + number - 1);
+}
+
 // ============================================================
 // SETTINGS (saved in ESP32 flash)
 // ============================================================
@@ -384,11 +463,36 @@ void loadSlots(const char* key, SlotSet& set, BulkAction firstBoot) {
   }
 }
 
+const char* const PROGRAM_KEYS[PROGRAM_COUNT] = { "program1", "program2", "program3" };
+
+// Programs are saved as one block each. Program 1 starts from the times saved by
+// older versions (one set of times); Programs 2 and 3 start as copies of Program 1.
+void loadPrograms() {
+  bool saved[PROGRAM_COUNT];
+  for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
+    Program& p = settings.programs[i];
+    saved[i] = prefs.isKey(PROGRAM_KEYS[i]) && prefs.getBytesLength(PROGRAM_KEYS[i]) == sizeof(Program);
+    if (saved[i]) prefs.getBytes(PROGRAM_KEYS[i], &p, sizeof(Program));
+    if (p.exactCount > MAX_EXACT_TIMES) p.exactCount = 0;
+  }
+  if (!saved[0]) {
+    Program& p = settings.programs[0];
+    memset(&p, 0, sizeof(Program));
+    loadSlots("tellerSlots", p.tellerTimes, BULK_ALL_ON);  // every 15 minutes, as before
+    loadSlots("happySlots", p.happyTimes, BULK_ALL_ON);
+    loadSlots("sundaySlots", p.sundayTimes, BULK_ALL_OFF);
+    applyBulkAction(p.blessingTimes, BULK_ALL_ON);         // older versions always played it
+  }
+  for (uint8_t i = 1; i < PROGRAM_COUNT; i++) {
+    if (!saved[i]) settings.programs[i] = settings.programs[0];
+  }
+}
+
 void loadSettings() {
   prefs.begin("timeteller", false);
-  loadSlots("tellerSlots", settings.tellerTimes, BULK_ALL_ON);  // every 15 minutes, as before
-  loadSlots("happySlots", settings.happyTimes, BULK_ALL_ON);
-  loadSlots("sundaySlots", settings.sundayTimes, BULK_ALL_OFF);
+  loadPrograms();
+  settings.program       = prefs.getUChar("program", 0) % PROGRAM_COUNT;
+  settings.language      = prefs.getUChar("language", 0) % LANGUAGE_COUNT;
   settings.silenceOn     = prefs.getBool("silenceOn", false);
   settings.silenceStart  = prefs.getUChar("silenceFrom", 36) % SLOT_COUNT;  // 9:00 AM
   settings.silenceEnd    = prefs.getUChar("silenceTo", 44) % SLOT_COUNT;    // 11:00 AM
@@ -408,9 +512,11 @@ void loadSettings() {
 
 void saveSettings() {
   prefs.begin("timeteller", false);
-  prefs.putBytes("tellerSlots", &settings.tellerTimes, sizeof(SlotSet));
-  prefs.putBytes("happySlots", &settings.happyTimes, sizeof(SlotSet));
-  prefs.putBytes("sundaySlots", &settings.sundayTimes, sizeof(SlotSet));
+  for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
+    prefs.putBytes(PROGRAM_KEYS[i], &settings.programs[i], sizeof(Program));
+  }
+  prefs.putUChar("program", settings.program);
+  prefs.putUChar("language", settings.language);
   prefs.putBool("silenceOn", settings.silenceOn);
   prefs.putUChar("silenceFrom", settings.silenceStart);
   prefs.putUChar("silenceTo", settings.silenceEnd);
@@ -449,7 +555,11 @@ void loadSchedules() {
     scheduleCount = sizeof(DEFAULT_SCHEDULES) / sizeof(DEFAULT_SCHEDULES[0]);
     memcpy(schedules, DEFAULT_SCHEDULES, sizeof(DEFAULT_SCHEDULES));
   }
-  for (Schedule& s : schedules) s.name[sizeof(s.name) - 1] = '\0';
+  for (Schedule& s : schedules) {
+    s.name[sizeof(s.name) - 1] = '\0';
+    // Older versions stored the SD card folder 20-99; now it is the sub-folder 1-13
+    if (s.songType == SONG_FOLDER && s.songNumber >= 20) s.songNumber -= 19;
+  }
 }
 
 void saveSchedules() {
@@ -677,23 +787,25 @@ void countFolder(uint8_t folder) {
 void countScheduleFolders() {
   for (uint8_t i = 0; i < scheduleCount; i++) {
     const Schedule& s = schedules[i];
-    if (s.songType == SONG_FOLDER && s.songNumber > 0 && s.songNumber < 100 && !folderCounted[s.songNumber]) {
-      countFolder(s.songNumber);
-    }
+    uint8_t folder = s.songType == SONG_FOLDER ? customFolder(s.songNumber) : 0;
+    if (folder && !folderCounted[folder]) countFolder(folder);
   }
   folderCountPending = false;
 }
 
-// Counts the files in every folder that is played at random
+// Counts the files in every folder of the selected language that is played at random
 void countAllFolders() {
   const uint8_t randomFolders[] = {
     FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_DONGLE, FOLDER_CHURCH_NAME, FOLDER_BLESSING,
-    FOLDER_QUOTES, FOLDER_EXTRA_QUOTES, FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
+    FOLDER_QUOTES, FOLDER_EXTRA_QUOTES, FOLDER_HAPPY_EARLY, FOLDER_HAPPY_MORNING,
+    FOLDER_HAPPY_EVENING, FOLDER_HAPPY_NIGHT, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
   };
   memset(folderCounts, 0, sizeof(folderCounts));
   memset(folderCounted, 0, sizeof(folderCounted));
-  for (uint8_t folder : randomFolders) countFolder(folder);
+  Serial.printf("Counting the files of Language_%d\n", settings.language + 1);
+  for (uint8_t folder : randomFolders) countFolder(langFolder(folder));
   countScheduleFolders();
+  languageCountPending = false;
 }
 
 // Startup: count the files, then list the empty folders on the LCD
@@ -847,20 +959,26 @@ void updatePlayer() {
 // TIME TELLER
 // ============================================================
 
-// Folder of the song after the announcement: monthly song, else Sunday song, else
-// happy song. Songs are set per quarter-hour. A folder with no files is skipped and
-// the next one is used. Returns 0 for no song.
-uint8_t chooseSongFolder(const DateTime& t) {
-  if (t.minute() % 15 != 0) return 0;
-  uint8_t slot = slotOf(t);
-  bool happy = slotOn(settings.happyTimes, slot);
-  bool sunday = t.dayOfTheWeek() == 0 && slotOn(settings.sundayTimes, slot);
-  bool monthly = (happy || sunday) && (settings.monthlySongs & (1 << (t.month() - 1)));
-  uint8_t happyFolder = t.hour() < 12 ? FOLDER_HAPPY_MORNING : FOLDER_HAPPY_EVENING;
+// Happy song folder for the time of day
+uint8_t happyFolderFor(uint8_t hour) {
+  if (hour < 6) return FOLDER_HAPPY_EARLY;     // 12 AM - 6 AM
+  if (hour < 12) return FOLDER_HAPPY_MORNING;  // 6 AM - 12 PM
+  if (hour < 18) return FOLDER_HAPPY_EVENING;  // 12 PM - 6 PM
+  return FOLDER_HAPPY_NIGHT;                   // 6 PM - 12 AM
+}
 
-  if (monthly && folderCounts[FOLDER_MONTHLY_SONGS] > 0) return FOLDER_MONTHLY_SONGS;
-  if (sunday && folderCounts[FOLDER_SUNDAY_SONGS] > 0) return FOLDER_SUNDAY_SONGS;
-  if (happy && folderCounts[happyFolder] > 0) return happyFolder;
+// SD card folder of the song after the announcement: monthly song, else Sunday song,
+// else happy song, as the active Program sets them for this minute. A folder with no
+// files is skipped and the next one is used. Returns 0 for no song.
+uint8_t chooseSongFolder(const DateTime& t, const TimeChoice& c) {
+  bool monthly = (c.happy || c.sunday) && (settings.monthlySongs & (1 << (t.month() - 1)));
+  uint8_t monthlyFolder = langFolder(FOLDER_MONTHLY_SONGS);
+  uint8_t sundayFolder = langFolder(FOLDER_SUNDAY_SONGS);
+  uint8_t happyFolder = langFolder(happyFolderFor(t.hour()));
+
+  if (monthly && folderCounts[monthlyFolder] > 0) return monthlyFolder;
+  if (c.sunday && folderCounts[sundayFolder] > 0) return sundayFolder;
+  if (c.happy && folderCounts[happyFolder] > 0) return happyFolder;
   return 0;
 }
 
@@ -870,41 +988,44 @@ uint8_t chooseSongFolder(const DateTime& t) {
 void playAnnouncement(const DateTime& t, int scheduleIndex) {
   Serial.printf("[%04d-%02d-%02d %02d:%02d:%02d] Playing time teller audio...\n",
                 t.year(), t.month(), t.day(), t.hour(), t.minute(), t.second());
+  if (languageCountPending && mp3Ok) countAllFolders();  // the language was just changed
+  TimeChoice c = timesAt(t);
   playlistClear();
-  playlistAddRandom(FOLDER_RYTHEM, nullptr);
-  playlistAddRandom(FOLDER_WISHING, nullptr);
+  playlistAddRandom(langFolder(FOLDER_RYTHEM), nullptr);
+  playlistAddRandom(langFolder(FOLDER_WISHING), nullptr);
   // Dongle: the bell rings once per hour on a 12-hour clock (5 AM / 5 PM = 5, 12 = 12)
-  if (folderCounts[FOLDER_DONGLE] > 0) {
+  uint8_t dongle = langFolder(FOLDER_DONGLE);
+  if (folderCounts[dongle] > 0) {
     uint8_t rings = t.hour() % 12 == 0 ? 12 : t.hour() % 12;
-    for (uint8_t i = 0; i < rings; i++) playlistAdd(FOLDER_DONGLE, 1, nullptr);
+    for (uint8_t i = 0; i < rings; i++) playlistAdd(dongle, 1, nullptr);
   } else {
-    Serial.printf("Folder %02d is empty or missing, skipping\n", FOLDER_DONGLE);
+    Serial.printf("Folder %02d is empty or missing, skipping\n", dongle);
   }
   if (t.minute() % 15 == 0) {  // time clips exist only for quarter-hours
-    playlistAdd(FOLDER_TIME, slotOf(t) + 1, nullptr);
+    playlistAdd(langFolder(FOLDER_TIME), slotOf(t) + 1, nullptr);
   }
   // Files picked by number (time, date, month, day, year) are skipped by the
   // player if they are missing on the SD card
-  playlistAdd(FOLDER_DATE, t.day(), nullptr);
-  playlistAdd(FOLDER_MONTH, t.month(), nullptr);
-  playlistAdd(FOLDER_DAY, t.dayOfTheWeek() + 1, nullptr);  // RTClib: 0 = Sunday
-  playlistAdd(FOLDER_YEAR, t.year() - 2000, nullptr);      // 2026 -> 026.mp3
-  if (settings.churchName) playlistAddRandom(FOLDER_CHURCH_NAME, nullptr);
-  playlistAddRandom(FOLDER_BLESSING, nullptr);
-  playlistAddRandom(FOLDER_QUOTES, nullptr);
-  if (settings.extraQuotes) playlistAddRandom(FOLDER_EXTRA_QUOTES, nullptr);
+  playlistAdd(langFolder(FOLDER_DATE), t.day(), nullptr);
+  playlistAdd(langFolder(FOLDER_MONTH), t.month(), nullptr);
+  playlistAdd(langFolder(FOLDER_DAY), t.dayOfTheWeek() + 1, nullptr);  // RTClib: 0 = Sunday
+  playlistAdd(langFolder(FOLDER_YEAR), t.year() - 2000, nullptr);      // 2026 -> 026.mp3
+  if (settings.churchName) playlistAddRandom(langFolder(FOLDER_CHURCH_NAME), nullptr);
+  if (c.blessing) playlistAddRandom(langFolder(FOLDER_BLESSING), nullptr);
+  playlistAddRandom(langFolder(FOLDER_QUOTES), nullptr);
+  if (settings.extraQuotes) playlistAddRandom(langFolder(FOLDER_EXTRA_QUOTES), nullptr);
 
   // The song set for this time (monthly, Sunday or happy), then the schedule's custom song
-  uint8_t songFolder = chooseSongFolder(t);
+  uint8_t songFolder = chooseSongFolder(t, c);
   if (songFolder) {
     Serial.printf("Song from folder %02d\n", songFolder);
     playlistAddRandom(songFolder, nullptr);
   }
   const Schedule* s = scheduleIndex >= 0 ? &schedules[scheduleIndex] : nullptr;
   if (s && s->songType == SONG_TRACK) {
-    playlistAdd(FOLDER_CUSTOM, s->songNumber, s->name);
+    playlistAdd(langFolder(FOLDER_CUSTOM), s->songNumber, s->name);
   } else if (s && s->songType == SONG_FOLDER) {
-    playlistAddRandom(s->songNumber, s->name);
+    playlistAddRandom(customFolder(s->songNumber), s->name);
   }
   startPlaylist();
 }
@@ -913,7 +1034,7 @@ void playTestSong() {
   if (!isPlayerIdle()) return;
   Serial.println("Test button pressed");
   playlistClear();
-  playlistAdd(FOLDER_TEST, 1, "Test song");
+  playlistAdd(langFolder(FOLDER_TEST), 1, "Test song");
   startPlaylist();
 }
 
@@ -950,7 +1071,7 @@ void onNewMinute(const DateTime& t) {
   }
 
   int scheduleIndex = findSchedule(t);
-  bool tellerTime = t.minute() % 15 == 0 && slotOn(settings.tellerTimes, slotOf(t));
+  bool tellerTime = timesAt(t).teller;
   if (scheduleIndex < 0 && !tellerTime) return;
   if (inSundaySilence(t)) {
     Serial.println("Sunday Silence time, nothing played");
@@ -1022,6 +1143,12 @@ void drawMenu() {
     case MENU_PHONE:
       snprintf(line1, sizeof(line1), "%s", hotspotIp);
       break;
+    case MENU_PROGRAM:
+      snprintf(line1, sizeof(line1), "Using Program %d", settings.program + 1);
+      break;
+    case MENU_LANGUAGE:
+      snprintf(line1, sizeof(line1), "Language %d", settings.language + 1);
+      break;
     default:  // items that open a sub-menu
       snprintf(line1, sizeof(line1), "Tap Set to Open");
       break;
@@ -1041,7 +1168,7 @@ void drawTimeList() {
     formatSlot(label, sizeof(label), slot);
     snprintf(line0, sizeof(line0), "> %s", label);
     bool on = slotOn(*timeList, slot);
-    if (on && timeListIsSong && !slotOn(settings.tellerTimes, slot)) {
+    if (on && timeListIsSong && !slotOn(currentProgram().tellerTimes, slot)) {
       snprintf(line1, sizeof(line1), "ON (Teller OFF)");  // a song only plays when the teller runs
     } else {
       snprintf(line1, sizeof(line1), "Status: %s", on ? "ON" : "OFF");
@@ -1198,9 +1325,10 @@ void handleMenuEvent(InputEvent ev) {
     case EV_SET:
       switch (menuIndex) {
         case MENU_DATE_TIME:    startTimeEditor(); return;
-        case MENU_TELLER_TIMES: openTimeList(&settings.tellerTimes, false); return;
-        case MENU_HAPPY_SONGS:  openTimeList(&settings.happyTimes, true); return;
-        case MENU_SUNDAY_SONGS: openTimeList(&settings.sundayTimes, true); return;
+        case MENU_TELLER_TIMES:   openTimeList(&currentProgram().tellerTimes, false); return;
+        case MENU_HAPPY_SONGS:    openTimeList(&currentProgram().happyTimes, true); return;
+        case MENU_SUNDAY_SONGS:   openTimeList(&currentProgram().sundayTimes, true); return;
+        case MENU_BLESSING_TIMES: openTimeList(&currentProgram().blessingTimes, true); return;
         case MENU_SUNDAY_SILENCE:
           silenceIndex = 0;
           silenceAdjusting = false;
@@ -1230,6 +1358,11 @@ void handleMenuEvent(InputEvent ev) {
         case MENU_SPEAKER:        settings.speakerOutput = !settings.speakerOutput; break;
         case MENU_MORNING_VOLUME: settings.morningVolume = (settings.morningVolume + 1) % 11; break;  // cycle 0-10
         case MENU_EVENING_VOLUME: settings.eveningVolume = (settings.eveningVolume + 1) % 11; break;
+        case MENU_PROGRAM:        settings.program = (settings.program + 1) % PROGRAM_COUNT; break;
+        case MENU_LANGUAGE:
+          settings.language = (settings.language + 1) % LANGUAGE_COUNT;
+          languageCountPending = true;  // counted once back on the home screen
+          break;
       }
       drawMenu();
       break;
@@ -1477,6 +1610,7 @@ void loop() {
   updateMessage();
   updateStatusLed();
   webLoop();
+  if (languageCountPending && mp3Ok && isPlayerIdle() && screen == SCREEN_HOME) countAllFolders();
   if (folderCountPending && mp3Ok && isPlayerIdle()) countScheduleFolders();
   delay(5);
 }

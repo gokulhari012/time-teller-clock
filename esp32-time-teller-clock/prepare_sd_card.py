@@ -1,9 +1,13 @@
 """Copy the Time Teller audio files into the numbered layout the MP3-TF-16P module needs.
 
 The MP3 module can only play a file by folder number and file number (for
-example 03/025.mp3), not by name. This script copies the Raspberry Pi audio
-folders (Audio-files/) into that layout and writes track-list.txt, which shows
-which original file became which number.
+example 03/025.mp3), not by name. This script copies the audio folders
+(Audio-files/Language_1, Language_2, Language_3) into that layout and writes
+track-list.txt, which shows which original file became which number.
+
+Each language gets a block of 33 folders: Language_1 = 01-33, Language_2 = 34-66,
+Language_3 = 67-99. A missing Language folder is skipped. An Audio-files folder
+with the old layout (no Language folders) is copied as Language_1.
 
 Usage:
     python prepare_sd_card.py [<Audio-files folder> [<SD card or output folder>]] [--overwrite]
@@ -37,8 +41,11 @@ DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "satur
 FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_TIME, FOLDER_DATE, FOLDER_MONTH, FOLDER_DAY = 1, 2, 3, 4, 5, 6
 FOLDER_CHURCH_NAME, FOLDER_QUOTES, FOLDER_EXTRA_QUOTES = 7, 8, 9
 FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS = 10, 11, 12, 13
-FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 20
+FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 21
 FOLDER_YEAR, FOLDER_DONGLE, FOLDER_BLESSING = 16, 17, 18
+FOLDER_HAPPY_EARLY, FOLDER_HAPPY_NIGHT = 19, 20
+LANGUAGE_COUNT, LANGUAGE_FOLDERS = 3, 33   # Language_N uses folders (N-1)*33 + 1 ... N*33
+MAX_CUSTOM_FOLDERS = LANGUAGE_FOLDERS - FIRST_CUSTOM_FOLDER + 1  # 13 Custom_songs sub-folders
 
 TIME_RE = re.compile(r"^time-(\d{1,2}) (\d{2}) (AM|PM)\.mp3$", re.IGNORECASE)
 DATE_RE = re.compile(r"^date-(\d{1,2})\.mp3$", re.IGNORECASE)
@@ -122,11 +129,11 @@ class SdCardBuilder:
             self.warnings.append(f"{title}: no .mp3 files, folder {folder:02d} not created")
         self.sections.append((f"{folder:02d}  {title}  ({len(files)} files)", lines))
 
-    def copy_by_name(self, folder, source_folder, track_for_name, expected, title):
+    def copy_by_name(self, folder, source_dir, track_for_name, expected, title):
         """Number the files from their names (time, date, month, day, year).
         expected=None: any number of files, no missing-file warning (year)."""
         lines, used = [], {}
-        for file in mp3_files(self.source / source_folder):
+        for file in mp3_files(source_dir):
             track = track_for_name(file.name)
             if track is None:
                 self.warnings.append(f"{title}: file name not recognised, skipped: {file.name}")
@@ -160,6 +167,52 @@ class SdCardBuilder:
         (self.dest / "track-list.txt").write_text("\n".join(text) + "\n", encoding="utf-8")
 
 
+def copy_language(builder, src, base, lang):
+    """Copy one Language folder into SD folders base+1 ... base+33."""
+    builder.copy_in_order(base + FOLDER_RYTHEM, mp3_files(src / "Rythem"), f"{lang}/Rythem (random)")
+    builder.copy_in_order(base + FOLDER_WISHING, mp3_files(src / "Wishing"), f"{lang}/Wishing (random)")
+    builder.copy_by_name(base + FOLDER_TIME, src / "Time", time_track, 96, f"{lang}/Time")
+    builder.copy_by_name(base + FOLDER_DATE, src / "Date", date_track, 31, f"{lang}/Date")
+    builder.copy_by_name(base + FOLDER_MONTH, src / "Month", month_track, 12, f"{lang}/Month")
+    builder.copy_by_name(base + FOLDER_DAY, src / "Day", day_track, 7, f"{lang}/Day")
+    builder.copy_by_name(base + FOLDER_YEAR, src / "Year", year_track, None, f"{lang}/Year (year-2026.mp3 -> 026)")
+    dongle = mp3_files(src / "Dongle")
+    if len(dongle) > 1:
+        builder.warnings.append(f"{lang}/Dongle: {len(dongle)} files, only the first ({dongle[0].name}) is used as the bell")
+    builder.copy_in_order(base + FOLDER_DONGLE, dongle[:1], f"{lang}/Dongle (bell, rung once per hour)")
+    builder.copy_in_order(base + FOLDER_CHURCH_NAME, mp3_files(src / "church_name"), f"{lang}/church_name (random)")
+    builder.copy_in_order(base + FOLDER_BLESSING, mp3_files(src / "Blessing_prayer"), f"{lang}/Blessing_prayer (random)")
+    builder.copy_in_order(base + FOLDER_QUOTES, mp3_files(src / "Quotes"), f"{lang}/Quotes (random)")
+    builder.copy_in_order(base + FOLDER_EXTRA_QUOTES, mp3_files(src / "extra_quotes"), f"{lang}/extra_quotes (random)")
+    builder.copy_in_order(base + FOLDER_HAPPY_EARLY, mp3_files(src / "happy_songs_early_morning"),
+                          f"{lang}/happy_songs_early_morning (random, 12 AM - 6 AM)")
+    builder.copy_in_order(base + FOLDER_HAPPY_MORNING, mp3_files(src / "happy_songs_morning"),
+                          f"{lang}/happy_songs_morning (random, 6 AM - 12 PM)")
+    builder.copy_in_order(base + FOLDER_HAPPY_EVENING, mp3_files(src / "happy_songs_evening"),
+                          f"{lang}/happy_songs_evening (random, 12 PM - 6 PM)")
+    builder.copy_in_order(base + FOLDER_HAPPY_NIGHT, mp3_files(src / "happy_songs_night"),
+                          f"{lang}/happy_songs_night (random, 6 PM - 12 AM)")
+    builder.copy_in_order(base + FOLDER_SUNDAY_SONGS, mp3_files(src / "sunday_songs"), f"{lang}/sunday_songs (random)")
+    builder.copy_in_order(base + FOLDER_MONTHLY_SONGS, mp3_files(src / "monthly_songs"), f"{lang}/monthly_songs (random)")
+
+    custom_dir = src / "Custom_songs"
+    custom_files = mp3_files(custom_dir)
+    songs = [f for f in custom_files if f.name.lower() != TEST_SONG]
+    tests = [f for f in custom_files if f.name.lower() == TEST_SONG]
+    builder.copy_in_order(base + FOLDER_CUSTOM, songs, f"{lang}/Custom_songs - use 'One song' with the file number")
+    builder.copy_in_order(base + FOLDER_TEST, tests, f"{lang}/Test song")
+
+    subfolders = sorted((d for d in custom_dir.iterdir() if d.is_dir()), key=lambda d: d.name.lower()) \
+        if custom_dir.is_dir() else []
+    for number, sub in enumerate(subfolders, start=1):
+        if number > MAX_CUSTOM_FOLDERS:
+            builder.warnings.append(f"{lang}/Custom_songs: more than {MAX_CUSTOM_FOLDERS} sub-folders, "
+                                    f"'{sub.name}' and later were skipped")
+            break
+        builder.copy_in_order(base + FIRST_CUSTOM_FOLDER + number - 1, mp3_files(sub),
+                              f"{lang}/Custom_songs/{sub.name} - use 'Random from a sub-folder' {number}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Copy Audio-files into the numbered layout for the MP3-TF-16P module.")
     parser.add_argument("source", type=Path, nargs="?",
@@ -186,43 +239,16 @@ def main():
             shutil.rmtree(folder)
 
     builder = SdCardBuilder(source, dest)
-    builder.copy_in_order(FOLDER_RYTHEM, mp3_files(source / "Rythem"), "Rythem (random)")
-    builder.copy_in_order(FOLDER_WISHING, mp3_files(source / "Wishing"), "Wishing (random)")
-    builder.copy_by_name(FOLDER_TIME, "Time", time_track, 96, "Time")
-    builder.copy_by_name(FOLDER_DATE, "Date", date_track, 31, "Date")
-    builder.copy_by_name(FOLDER_MONTH, "Month", month_track, 12, "Month")
-    builder.copy_by_name(FOLDER_DAY, "Day", day_track, 7, "Day")
-    builder.copy_by_name(FOLDER_YEAR, "Year", year_track, None, "Year (year-2026.mp3 -> 026)")
-    dongle = mp3_files(source / "Dongle")
-    if len(dongle) > 1:
-        builder.warnings.append(f"Dongle: {len(dongle)} files, only the first ({dongle[0].name}) is used as the bell")
-    builder.copy_in_order(FOLDER_DONGLE, dongle[:1], "Dongle (bell, rung once per hour)")
-    builder.copy_in_order(FOLDER_BLESSING, mp3_files(source / "Blessing_prayer"), "Blessing_prayer (random)")
-    builder.copy_in_order(FOLDER_CHURCH_NAME, mp3_files(source / "church_name"), "church_name (random)")
-    builder.copy_in_order(FOLDER_QUOTES, mp3_files(source / "Quotes"), "Quotes (random)")
-    builder.copy_in_order(FOLDER_EXTRA_QUOTES, mp3_files(source / "extra_quotes"), "extra_quotes (random)")
-    builder.copy_in_order(FOLDER_HAPPY_MORNING, mp3_files(source / "happy_songs_morning"),
-                          "happy_songs_morning (random, 12 AM - 12 PM)")
-    builder.copy_in_order(FOLDER_HAPPY_EVENING, mp3_files(source / "happy_songs_evening"),
-                          "happy_songs_evening (random, 12 PM - 12 AM)")
-    builder.copy_in_order(FOLDER_SUNDAY_SONGS, mp3_files(source / "sunday_songs"), "sunday_songs (random)")
-    builder.copy_in_order(FOLDER_MONTHLY_SONGS, mp3_files(source / "monthly_songs"), "monthly_songs (random)")
-
-    custom_dir = source / "Custom_songs"
-    custom_files = mp3_files(custom_dir)
-    songs = [f for f in custom_files if f.name.lower() != TEST_SONG]
-    tests = [f for f in custom_files if f.name.lower() == TEST_SONG]
-    builder.copy_in_order(FOLDER_CUSTOM, songs, "Custom_songs - use SONG_TRACK with the file number")
-    builder.copy_in_order(FOLDER_TEST, tests, "Test song")
-
-    subfolders = sorted((d for d in custom_dir.iterdir() if d.is_dir()), key=lambda d: d.name.lower()) \
-        if custom_dir.is_dir() else []
-    for folder, sub in enumerate(subfolders, start=FIRST_CUSTOM_FOLDER):
-        if folder > 99:
-            builder.warnings.append(f"Custom_songs: more than {99 - FIRST_CUSTOM_FOLDER + 1} sub-folders, "
-                                    f"'{sub.name}' and later were skipped")
-            break
-        builder.copy_in_order(folder, mp3_files(sub), f"Custom_songs/{sub.name} - use SONG_FOLDER {folder}")
+    languages = [source / f"Language_{n}" for n in range(1, LANGUAGE_COUNT + 1)]
+    if not any(d.is_dir() for d in languages):
+        print("No Language_1/2/3 folders found: copying the folders as Language_1")
+        languages = [source] + languages[1:]
+    for n, lang_dir in enumerate(languages, start=1):
+        if lang_dir.is_dir():
+            copy_language(builder, lang_dir, (n - 1) * LANGUAGE_FOLDERS, f"Language_{n}")
+        else:
+            builder.warnings.append(f"Language_{n}: folder not found, folders "
+                                    f"{(n - 1) * LANGUAGE_FOLDERS + 1:02d}-{n * LANGUAGE_FOLDERS:02d} not created")
 
     builder.write_track_list()
     print((dest / "track-list.txt").read_text(encoding="utf-8"))

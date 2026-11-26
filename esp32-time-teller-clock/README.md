@@ -7,7 +7,7 @@ This folder has the same church time-teller clock as the Raspberry Pi program, r
 | [esp32-time-teller-clock.ino](esp32-time-teller-clock.ino) | The Arduino program |
 | [web_settings.ino](web_settings.ino) | The phone settings page: Wi-Fi hotspot and web server (opens as a second tab in the Arduino IDE) |
 | [web_page.h](web_page.h) | The settings page itself (HTML, CSS and JavaScript in one file) |
-| [prepare_sd_card.py](prepare_sd_card.py) | Copies `Audio-files/` onto the SD card in the numbered layout the MP3 module needs |
+| [prepare_sd_card.py](prepare_sd_card.py) | Copies `Audio-files/Language_1` … `Language_3` onto the SD card in the numbered layout the MP3 module needs |
 
 The announcements, schedules, LCD menu and buttons work the same way as the Pi version. The main [README](../README.md) describes them. On top of that, every setting can be changed from a phone. See [Setting up from a phone](#setting-up-from-a-phone).
 
@@ -37,13 +37,13 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Morning/evening volume | Uses the system clock; switches at 5 AM and 5 PM | Uses the RTC; the switch times can be changed on the phone |
 | Announcement order | Rhythm, wishing, time, date, month, weekday, church name, quote, extra quote, song | Adds a bell (dongle) before the time, the year after the weekday, and a blessing prayer after the church name (see [Playback order](#playback-order)) |
 
-Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Teller Times, Sunday Silence and the LCD menu. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
+Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Sunday Silence and the LCD menu. On top of the Pi version, the ESP32 has [three Programs of times, specific minutes](#programs-and-specific-minutes), [three languages](#languages), four happy song periods and Blessing times. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
 
 > **Updating from the first ESP32 version:** the SD card folder numbers have changed. Build the card again with `prepare_sd_card.py --overwrite`. The new menu settings start at their defaults, which match the old behavior: an announcement and a happy song every 15 minutes.
 
 ### Playback order
 
-Every announcement plays these clips one after another. The order is set in `playAnnouncement()` in [esp32-time-teller-clock.ino](esp32-time-teller-clock.ino).
+Every announcement plays these clips one after another. The order is set in `playAnnouncement()` in [esp32-time-teller-clock.ino](esp32-time-teller-clock.ino). All clips come from the [selected language](#languages); the folder numbers below are for Language_1 (add 33 for Language_2, 66 for Language_3).
 
 | # | Step | SD folder | How the file is picked |
 |---|------|-----------|------------------------|
@@ -56,15 +56,41 @@ Every announcement plays these clips one after another. The order is set in `pla
 | 7 | Spoken weekday | `06` | `001` = Sunday … `007` = Saturday |
 | 8 | Spoken year | `16` | Year − 2000, e.g. `026` = 2026 |
 | 9 | Church name (if *Church Name* is ON) | `07` | Random |
-| 10 | Blessing prayer | `18` | Random |
+| 10 | Blessing prayer (at the *Blessing* times) | `18` | Random |
 | 11 | Quote | `08` | Random |
 | 12 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
-| 13 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `10`/`11` | Random, or none (see [Which song plays](../README.md#which-song-plays)) |
-| 14 | Custom song (schedules with a song only) | `14`, or `20`–`99` | The schedule's file number, or random from its folder |
+| 13 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `19`/`10`/`11`/`20` | Random, or none (see [Which song plays](../README.md#which-song-plays) and [happy song periods](#happy-song-periods)) |
+| 14 | Custom song (schedules with a song only) | `14`, or `21`–`33` | The schedule's file number, or random from its sub-folder |
 
 A step whose folder or file is missing on the SD card is skipped. A random folder or the bell folder that is empty at startup is skipped at once. A missing numbered file (time, date, month, day, year) is skipped when the MP3 module reports it, or after 2 seconds.
 
-An announcement starts at a quarter-hour that is ON in *Teller Times*, or at a time where a schedule matches the hour, minute, weekday and month. Nothing plays during Sunday Silence, or while the previous announcement is still playing.
+An announcement starts at a quarter-hour that is ON in *Teller* in the active Program, at one of that Program's specific minutes with *Teller* ON, or at a time where a schedule matches the hour, minute, weekday and month. Nothing plays during Sunday Silence, or while the previous announcement is still playing.
+
+### Programs and specific minutes
+
+The clock has three sets of times: **Program 1**, **Program 2** and **Program 3**. It uses one of them at a time, chosen under **Times → The clock uses** on the phone page, or with *Program* in the LCD menu. Each Program has:
+
+- four quarter-hour lists: **Teller** (when announcements play), **Happy songs**, **Sunday songs** and **Blessing** (when the blessing prayer plays);
+- up to 20 **specific minutes**, e.g. 6:05 AM, each with its own *Teller*, *Happy song*, *Sunday song* and *Blessing* switches. At a minute that is not :00, :15, :30 or :45 there is no spoken time, because the Time folder has clips for quarter-hours only.
+
+The LCD menus *Teller Times*, *Happy Songs*, *Sunday Songs* and *Blessing Times* change the Program in use. Specific minutes can only be changed on the phone. Schedules don't belong to a Program: they run whichever Program is used.
+
+After updating from a version without Programs, Program 1 keeps your old times, with the blessing prayer at every time (as before). Programs 2 and 3 start as copies of Program 1.
+
+### Happy song periods
+
+| Time | Folder | SD folder (Language_1) |
+|------|--------|------------------------|
+| 12:00 AM – 5:59 AM | `happy_songs_early_morning` | `19` |
+| 6:00 AM – 11:59 AM | `happy_songs_morning` | `10` |
+| 12:00 PM – 5:59 PM | `happy_songs_evening` | `11` |
+| 6:00 PM – 11:59 PM | `happy_songs_night` | `20` |
+
+If the folder for that time has no songs, no happy song plays.
+
+### Languages
+
+`Audio-files/` has one folder per language: `Language_1`, `Language_2` and `Language_3`. Each holds the full set of folders (`Rythem`, `Time`, `Date`, …, `Custom_songs`). Choose the language under **Language** on the phone page, or with *Language* in the LCD menu. Every clip of the announcement, the songs, the custom songs and the test song then come from that language. After a change, the clock counts that language's files again (on the phone at once, from the LCD when you are back on the home screen).
 
 ---
 
@@ -92,13 +118,14 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 |---------|-----------------|
 | **Play** | **Test song**, **Announce now** (plays the announcement for the current time; the spoken time only exists at :00, :15, :30 and :45), and **Stop** (stops anything that is playing). Also shows what is playing. |
 | **Date & time** | Set the clock to the phone's time with one tap, or type a date and time. The clock's current time is shown at the top of the page. |
-| **Times** | Three tabs: **Teller** (when announcements play), **Happy songs** and **Sunday songs**. Each shows all 96 quarter-hours as boxes to tap. Tap an hour's label to switch its four boxes together. The shortcuts are **All ON**, **All OFF**, **Every hour** and **Same as Teller**. A dashed box means a song is set but Teller is OFF at that time. |
+| **Times** | **The clock uses** picks the active Program; the **Program 1/2/3** buttons pick the one to edit (✓ = in use). Four tabs: **Teller** (when announcements play), **Happy songs**, **Sunday songs** and **Blessing**. Each shows all 96 quarter-hours as boxes to tap. Tap an hour's label to switch its four boxes together. The shortcuts are **All ON**, **All OFF**, **Every hour** and **Same as Teller**. A dashed box means a song or blessing is set but Teller is OFF at that time. Below the boxes, **Specific minutes** adds times at any minute. See [Programs and specific minutes](#programs-and-specific-minutes). |
+| **Language** | Language 1, 2 or 3: which `Language_N` folder the audio comes from |
 | **Sunday Silence** | ON/OFF, start and end time |
 | **Monthly Songs** | Tap the months that play monthly songs |
 | **Announcement** | Church name ON/OFF, extra quotes ON/OFF |
 | **Startup screen** | **Show mobile number** ON/OFF, the **Mobile number** (default `9043172726`), and the **Name** shown after it (default `KAIROSE TECH`; leave it empty to skip it). Up to 16 characters each. Phone-only; shown at the next restart. |
 | **Sound** | Speaker output (relay), morning and evening volume (0–10), and the times the morning and evening volumes start. The start times are phone-only. |
-| **Schedules** | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from folder 14, or a random song from a folder 20–99). |
+| **Schedules** | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from `Custom_songs`, or a random song from a `Custom_songs` sub-folder 1–13), taken from the selected language. |
 | **SD card** | Lists each song folder with its number of files. Empty folders are shown in orange. **Rescan SD card** counts them again after you copy new songs, with no restart needed. |
 | **Clock health** | Free memory (and the lowest it has been since the clock started), how long the clock has been running, and why it last started. See [If the Wi-Fi drops](#if-the-wi-fi-drops). |
 
@@ -185,7 +212,7 @@ The MP3-TF-16P has two kinds of output:
 ## Preparing the SD card
 
 1. Format the micro-SD card as **FAT32**.
-2. Put your audio into the Pi project's `Audio-files/` folders as usual (see the main README).
+2. Put your audio into `Audio-files/Language_1`, `Language_2` and `Language_3`. Each language folder has the same sub-folders (`Rythem`, `Wishing`, `Time`, …). A missing language is skipped. An `Audio-files/` folder in the old layout, with no `Language_` folders, is copied as Language 1.
 3. Run the script from this folder. For example, if the SD card is drive `E:`:
    ```bash
    python prepare_sd_card.py ../Audio-files E:\
@@ -196,6 +223,8 @@ The MP3-TF-16P has two kinds of output:
 To rebuild a card that already has numbered folders, add `--overwrite`. This deletes the folders `01`–`99` on the card before copying.
 
 ### SD card layout
+
+Each language has a block of 33 folders: **Language_1 = `01`–`33`, Language_2 = `34`–`66`, Language_3 = `67`–`99`**. The table shows Language_1. For Language_2 add 33 (for example Rythem = `34`, Time = `36`), and for Language_3 add 66 (Rythem = `67`).
 
 | Folder | Contents | How the clock picks a file |
 |--------|----------|----------------------------|
@@ -208,18 +237,20 @@ To rebuild a card that already has numbered folders, add `--overwrite`. This del
 | `07` | church_name | Random (if *Church Name* is ON) |
 | `08` | Quotes | Random |
 | `09` | extra_quotes | Random (if *Extra Quotes* is ON) |
-| `10` | happy_songs_morning | Random, for songs from 12 AM to 12 PM |
-| `11` | happy_songs_evening | Random, for songs from 12 PM to 12 AM |
+| `10` | happy_songs_morning | Random, for songs from 6 AM to 12 PM |
+| `11` | happy_songs_evening | Random, for songs from 12 PM to 6 PM |
 | `12` | sunday_songs | Random |
 | `13` | monthly_songs | Random |
 | `14` | `Custom_songs/*.mp3` in name order, except the test song | Number given in a schedule |
 | `15` | `001` = `Custom_songs/Testsong.mp3` | Test button |
 | `16` | Year: `Year/year-2026.mp3` → `026` (2001–2255) | Year − 2000 |
 | `17` | Dongle: `001` = the first file in `Dongle/` (one bell sound) | Rung once per hour (12-hour clock) |
-| `18` | Blessing_prayer | Random |
-| `20`–`99` | One folder per `Custom_songs/` sub-folder, in name order | Random, for a folder schedule |
+| `18` | Blessing_prayer | Random, at the *Blessing* times |
+| `19` | happy_songs_early_morning | Random, for songs from 12 AM to 6 AM |
+| `20` | happy_songs_night | Random, for songs from 6 PM to 12 AM |
+| `21`–`33` | `Custom_songs/` sub-folders 1–13, in name order | Random, for a sub-folder schedule |
 
-Folder 19 is unused, so a new fixed folder can be added later without renumbering the custom folders.
+Each language can have up to 13 `Custom_songs` sub-folders; the script warns about any more. A schedule's sub-folder number (1–13) and song number mean the same position in every language, so give the folders and files the same names in each language.
 
 At startup the clock asks the module how many files are in each random folder. Any folder with no files is listed on the LCD (`No files in N:` followed by the folder numbers) and then skipped when playing. If you add songs later, tap **Rescan SD card** on the phone page, or restart the clock.
 
@@ -286,8 +317,10 @@ Schedules are managed on the phone page. On first boot the clock starts with the
 |-----------------|------------|
 | `"time": "06:05"` | Time 6:05 AM |
 | `"days"`, `"months"` | Tap the days and months (or **Every day** / **All**) |
-| `"custom_song": "GokulHari.mp3"` | Custom song: **One song (folder 14)**, number **1** (from folder `14` in `track-list.txt`) |
-| `"custom_song": "new_folder"` | Custom song: **Random from a folder**, number **20** (the folder number in `track-list.txt`) |
+| `"custom_song": "GokulHari.mp3"` | Custom song: **One song (Custom_songs)**, number **1** (from folder `14` in `track-list.txt`) |
+| `"custom_song": "new_folder"` | Custom song: **Random from a sub-folder**, number **1** (the sub-folder number in `track-list.txt`) |
+
+Schedules saved by an older version with a folder number 20–99 are changed to the sub-folder number (20 → 1, 21 → 2, …) at startup.
 | no `custom_song` | Custom song: **None**. The announcement still ends with the song set for that time. |
 | `"enabled"` | The ON/OFF switch (also in the LCD *Schedule Songs* menu) |
 
