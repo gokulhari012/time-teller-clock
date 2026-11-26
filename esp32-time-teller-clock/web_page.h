@@ -99,7 +99,7 @@ body.user .admin{display:none}
   <div class="row first"><span>The clock uses</span><select id="program"><option value="0">Program 1</option><option value="1">Program 2</option><option value="2">Program 3</option></select></div>
   <div class="lbl">Program to edit</div>
   <div class="tabs" id="progTabs"></div>
-  <div class="tabs" id="timeTabs"><button data-k="teller">Teller</button><button data-k="happy">Happy songs</button><button data-k="sunday">Sunday songs</button><button data-k="blessing">Blessing</button></div>
+  <div class="tabs" id="timeTabs"><button data-k="teller">Teller</button><button data-k="happy">Happy songs</button><button data-k="sunday">Sunday songs</button><button data-k="blessing">Blessing</button><button data-k="promise">Promise</button></div>
   <p class="muted" id="gridHelp"></p>
   <div class="btns" id="gridBtns"></div>
   <div class="grid" id="grid"></div>
@@ -232,10 +232,11 @@ const HELP = {
   teller: 'The time teller runs at the blue times.',
   happy: 'Blue times end with a happy song: early morning songs from 12 AM, morning songs from 6 AM, evening songs from 12 PM and night songs from 6 PM. A dashed box means Teller is OFF at that time, so the song only plays if a schedule runs then.',
   sunday: 'On Sundays, blue times play a Sunday song instead of the happy song. A dashed box means Teller is OFF at that time.',
-  blessing: 'The blessing prayer plays after the church name at the blue times. A dashed box means Teller is OFF at that time.'
+  blessing: 'The blessing prayer plays after the monthly promise at the blue times. A dashed box means Teller is OFF at that time.',
+  promise: 'The monthly promise plays after the church name at the blue times: this month\'s file from monthly_promise (month-jan.mp3 in January, and so on). A dashed box means Teller is OFF at that time.'
 };
 // Specific minutes: what plays, as bits of f
-const XFLAGS = [['Teller', 1], ['Happy song', 2], ['Sunday song', 4], ['Blessing', 8]];
+const XFLAGS = [['Teller', 1], ['Happy song', 2], ['Sunday song', 4], ['Blessing', 8], ['Monthly promise', 16]];
 
 let pw = '', role = 'admin';  // login: role is 'admin' or 'user'
 try {
@@ -333,7 +334,8 @@ async function load() {
   const s = st.settings;
   S = Object.assign({}, s, {programs: s.programs.map(p => ({
     teller: hexToBits(p.t), happy: hexToBits(p.h), sunday: hexToBits(p.s), blessing: hexToBits(p.b),
-    exact: p.x ? p.x.split(',').map(e => ({h: +e.slice(0, 2), m: +e.slice(2, 4), f: parseInt(e[4], 16)})) : []
+    promise: hexToBits(p.p || '0'.repeat(24)),
+    exact: p.x ? p.x.split(',').map(e => ({h: +e.slice(0, 2), m: +e.slice(2, 4), f: parseInt(e.slice(4, 6), 16)})) : []
   }))});
   prog = S.program;
   scheds = st.schedules;
@@ -529,7 +531,8 @@ async function save() {
       S.programs.forEach((p, i) => {
         d['p' + i + 't'] = bitsToHex(p.teller); d['p' + i + 'h'] = bitsToHex(p.happy);
         d['p' + i + 's'] = bitsToHex(p.sunday); d['p' + i + 'b'] = bitsToHex(p.blessing);
-        d['p' + i + 'x'] = p.exact.map(e => pad(e.h) + pad(e.m) + e.f.toString(16)).join(',');
+        d['p' + i + 'p'] = bitsToHex(p.promise);
+        d['p' + i + 'x'] = p.exact.map(e => pad(e.h) + pad(e.m) + pad(e.f.toString(16))).join(',');
       });
       await api('/api/settings', Object.assign(d, {
         silenceOn: S.silenceOn ? 1 : 0, silenceStart: S.silenceStart, silenceEnd: S.silenceEnd, months: S.months,

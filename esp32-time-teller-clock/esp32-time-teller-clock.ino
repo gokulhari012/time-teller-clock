@@ -7,9 +7,9 @@
  * At the times chosen in the active Program (Teller times and specific minutes),
  * and at the times of the schedules, it plays:
  *   rhythm -> wishing -> dongle (bell, rung once per hour) -> time -> date
- *   -> month -> day -> year -> church name -> blessing prayer -> quote
- *   -> extra quote -> song
- * The blessing prayer plays at the Blessing times. The song is a season (Good Friday
+ *   -> month -> day -> year -> church name -> monthly promise -> blessing prayer
+ *   -> quote -> extra quote -> song
+ * The monthly promise plays at the Promise times, the blessing prayer at the Blessing times. The song is a season (Good Friday
  * week, Easter, Christmas week, New Year week), monthly, Sunday or happy song as set
  * for that time; a schedule's custom song plays after it.
  * All audio comes from the selected language (Language_1, _2 or _3 on the SD card).
@@ -180,7 +180,9 @@ const uint8_t FOLDER_RYTHEM        = 1;   // random file
 const uint8_t FOLDER_WISHING       = 2;   // random file
 const uint8_t FOLDER_TIME          = 3;   // 001-096 = 12:00 AM, 12:15 AM ... 11:45 PM
 const uint8_t FOLDER_DATE          = 4;   // 001-031
-const uint8_t FOLDER_MONTH         = 5;   // 001-012 = January ... December
+const uint8_t FOLDER_MONTH         = 5;   // 001-012 = January ... December (spoken month)
+                                          // 101-112 = monthly promise for January ... December
+const uint8_t PROMISE_FIRST_TRACK  = 101; // monthly_promise/month-jan.mp3 -> 05/101.mp3
 const uint8_t FOLDER_DAY           = 6;   // 001-007 = Sunday ... Saturday
 const uint8_t FOLDER_CHURCH_NAME   = 7;   // random file
 const uint8_t FOLDER_QUOTES        = 8;   // random file
@@ -285,12 +287,14 @@ struct SlotSet {
 
 // ---- Programs ----
 // Three sets of times (Program 1-3). The clock uses the active one, chosen on
-// the phone or in the LCD menu. Each has four quarter-hour lists and up to
+// the phone or in the LCD menu. Each has five quarter-hour lists and up to
 // MAX_EXACT_TIMES specific minutes (phone only).
 const uint8_t PROGRAM_COUNT   = 3;
 const uint8_t MAX_EXACT_TIMES = 20;
 
-enum ExactFlag : uint8_t { EXACT_TELLER = 1, EXACT_HAPPY = 2, EXACT_SUNDAY = 4, EXACT_BLESSING = 8, EXACT_ALL = 15 };
+enum ExactFlag : uint8_t {
+  EXACT_TELLER = 1, EXACT_HAPPY = 2, EXACT_SUNDAY = 4, EXACT_BLESSING = 8, EXACT_PROMISE = 16, EXACT_ALL = 31
+};
 
 struct ExactTime {
   uint8_t hour;    // 0-23
@@ -305,10 +309,13 @@ struct Program {
   SlotSet blessingTimes;  // announcements with the blessing prayer
   uint8_t exactCount;
   ExactTime exact[MAX_EXACT_TIMES];
+  // Added later: kept last, so a Program saved by an older version is the start of this one
+  SlotSet promiseTimes;   // announcements with the monthly promise
 };
+const size_t PROGRAM_SIZE_BEFORE_PROMISE = offsetof(Program, promiseTimes);
 
 // What the active Program has set for one minute
-struct TimeChoice { bool teller, happy, sunday, blessing; };
+struct TimeChoice { bool teller, happy, sunday, blessing, promise; };
 
 enum BulkAction : uint8_t { BULK_ALL_ON, BULK_ALL_OFF, BULK_EVERY_HOUR, BULK_COUNT };
 const char* const BULK_NAMES[BULK_COUNT] = { "All ON", "All OFF", "Every hour" };
@@ -340,14 +347,14 @@ enum Screen : uint8_t {
 
 enum MenuItem : uint8_t {
   MENU_DATE_TIME, MENU_PROGRAM, MENU_TELLER_TIMES, MENU_HAPPY_SONGS, MENU_SUNDAY_SONGS,
-  MENU_BLESSING_TIMES, MENU_SUNDAY_SILENCE, MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES,
+  MENU_BLESSING_TIMES, MENU_PROMISE_TIMES, MENU_SUNDAY_SILENCE, MENU_MONTHLY, MENU_CHURCH_NAME, MENU_EXTRA_QUOTES,
   MENU_SCHEDULES, MENU_SPEAKER, MENU_MP3_RELAY, MENU_MORNING_VOLUME, MENU_EVENING_VOLUME,
   MENU_LANGUAGE, MENU_PHONE, MENU_PASSWORDS, MENU_COUNT
 };
 
 const char* const MENU_NAMES[MENU_COUNT] = {
   "Date & Time", "Program", "Teller Times", "Happy Songs", "Sunday Songs",
-  "Blessing Times", "Sunday Silence", "Monthly Songs", "Church Name", "Extra Quotes",
+  "Blessing Times", "Promise Times", "Sunday Silence", "Monthly Songs", "Church Name", "Extra Quotes",
   "Schedule Songs", "Speaker Output", "MP3 Player Relay", "Morning Volume", "Evening Volume",
   "Language", "Phone Settings", "Web Passwords"
 };
@@ -434,7 +441,7 @@ uint8_t silenceIndex = 0;      // 0 ON/OFF, 1 start time, 2 end time
 bool silenceAdjusting = false;
 
 // Player
-const uint8_t MAX_CLIPS = 32;  // up to 12 bell rings + 13 other clips
+const uint8_t MAX_CLIPS = 32;  // up to 12 bell rings + 14 other clips
 Clip playlist[MAX_CLIPS];
 uint8_t playlistLen = 0;
 uint8_t playlistPos = 0;
@@ -490,13 +497,14 @@ Program& currentProgram() {
 // :15, :30 and :45) joined with its specific minutes
 TimeChoice timesAt(const DateTime& t) {
   const Program& p = currentProgram();
-  TimeChoice c = { false, false, false, false };
+  TimeChoice c = { false, false, false, false, false };
   if (t.minute() % 15 == 0) {
     uint8_t slot = slotOf(t);
     c.teller   = slotOn(p.tellerTimes, slot);
     c.happy    = slotOn(p.happyTimes, slot);
     c.sunday   = slotOn(p.sundayTimes, slot);
     c.blessing = slotOn(p.blessingTimes, slot);
+    c.promise  = slotOn(p.promiseTimes, slot);
   }
   for (uint8_t i = 0; i < p.exactCount; i++) {
     const ExactTime& e = p.exact[i];
@@ -505,6 +513,7 @@ TimeChoice timesAt(const DateTime& t) {
     c.happy    |= (e.flags & EXACT_HAPPY) != 0;
     c.sunday   |= (e.flags & EXACT_SUNDAY) != 0;
     c.blessing |= (e.flags & EXACT_BLESSING) != 0;
+    c.promise  |= (e.flags & EXACT_PROMISE) != 0;
   }
   if (t.dayOfTheWeek() != 0) c.sunday = false;  // Sunday songs only on Sundays
   return c;
@@ -537,12 +546,15 @@ const char* const PROGRAM_KEYS[PROGRAM_COUNT] = { "program1", "program2", "progr
 
 // Programs are saved as one block each. Program 1 starts from the times saved by
 // older versions (one set of times); Programs 2 and 3 start as copies of Program 1.
+// A Program saved before the monthly promise existed is read with no promise times.
 void loadPrograms() {
   bool saved[PROGRAM_COUNT];
   for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
     Program& p = settings.programs[i];
-    saved[i] = prefs.isKey(PROGRAM_KEYS[i]) && prefs.getBytesLength(PROGRAM_KEYS[i]) == sizeof(Program);
-    if (saved[i]) prefs.getBytes(PROGRAM_KEYS[i], &p, sizeof(Program));
+    memset(&p, 0, sizeof(Program));
+    size_t length = prefs.isKey(PROGRAM_KEYS[i]) ? prefs.getBytesLength(PROGRAM_KEYS[i]) : 0;
+    saved[i] = length == sizeof(Program) || length == PROGRAM_SIZE_BEFORE_PROMISE;
+    if (saved[i]) prefs.getBytes(PROGRAM_KEYS[i], &p, length);
     if (p.exactCount > MAX_EXACT_TIMES) p.exactCount = 0;
   }
   if (!saved[0]) {
@@ -1182,6 +1194,8 @@ void playAnnouncement(const DateTime& t, int scheduleIndex) {
   playlistAdd(langFolder(FOLDER_DAY), t.dayOfTheWeek() + 1, nullptr);  // RTClib: 0 = Sunday
   playlistAdd(langFolder(FOLDER_YEAR), t.year() - 2000, nullptr);      // 2026 -> 026.mp3
   if (settings.churchName) playlistAddRandom(langFolder(FOLDER_CHURCH_NAME), nullptr);
+  // Monthly promise: this month's file (January = 101); skipped if it is not on the card
+  if (c.promise) playlistAdd(langFolder(FOLDER_MONTH), PROMISE_FIRST_TRACK + t.month() - 1, nullptr);
   if (c.blessing) playlistAddRandom(langFolder(FOLDER_BLESSING), nullptr);
   playlistAddRandom(langFolder(FOLDER_QUOTES), nullptr);
   if (settings.extraQuotes) playlistAddRandom(langFolder(FOLDER_EXTRA_QUOTES), nullptr);
@@ -1503,6 +1517,7 @@ void handleMenuEvent(InputEvent ev) {
         case MENU_HAPPY_SONGS:    openTimeList(&currentProgram().happyTimes, true); return;
         case MENU_SUNDAY_SONGS:   openTimeList(&currentProgram().sundayTimes, true); return;
         case MENU_BLESSING_TIMES: openTimeList(&currentProgram().blessingTimes, true); return;
+        case MENU_PROMISE_TIMES:  openTimeList(&currentProgram().promiseTimes, true); return;
         case MENU_SUNDAY_SILENCE:
           silenceIndex = 0;
           silenceAdjusting = false;

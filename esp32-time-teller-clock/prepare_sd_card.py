@@ -45,6 +45,7 @@ FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 25
 FOLDER_YEAR, FOLDER_DONGLE, FOLDER_BLESSING = 16, 17, 18
 FOLDER_HAPPY_EARLY, FOLDER_HAPPY_NIGHT = 19, 20
 FOLDER_GOOD_FRIDAY, FOLDER_EASTER, FOLDER_CHRISTMAS, FOLDER_NEW_YEAR = 21, 22, 23, 24
+PROMISE_FIRST_TRACK = 101  # monthly_promise goes into the Month folder: January = 101 ... December = 112
 LANGUAGE_COUNT, LANGUAGE_FOLDERS = 3, 33   # Language_N uses folders (N-1)*33 + 1 ... N*33
 MAX_CUSTOM_FOLDERS = LANGUAGE_FOLDERS - FIRST_CUSTOM_FOLDER + 1  # 9 Custom_songs sub-folders
 
@@ -53,6 +54,7 @@ DATE_RE = re.compile(r"^date-(\d{1,2})\.mp3$", re.IGNORECASE)
 MONTH_RE = re.compile(r"^month-([a-z]+)\.mp3$", re.IGNORECASE)
 DAY_RE = re.compile(r"^day-([a-z]+)\.mp3$", re.IGNORECASE)
 YEAR_RE = re.compile(r"^year-(\d{4})\.mp3$", re.IGNORECASE)
+PROMISE_RE = re.compile(r"^month-([a-z]+)\.mp3$", re.IGNORECASE)
 
 
 def mp3_files(folder):
@@ -97,6 +99,19 @@ def day_track(name):
     if not match or match.group(1).lower() not in DAYS:
         return None
     return DAYS.index(match.group(1).lower()) + 1
+
+
+def promise_track(name):
+    """monthly_promise: month-jan.mp3 or month-january.mp3 -> 101 ... month-dec.mp3 -> 112.
+    The month may be shortened to its first 3 or more letters (jan, feb, march, sept...)."""
+    match = PROMISE_RE.match(name)
+    if not match or len(match.group(1)) < 3:
+        return None
+    word = match.group(1).lower()
+    for number, month in enumerate(MONTHS):
+        if month.startswith(word):
+            return PROMISE_FIRST_TRACK + number
+    return None
 
 
 def year_track(name):
@@ -175,6 +190,16 @@ def copy_language(builder, src, base, lang):
     builder.copy_by_name(base + FOLDER_TIME, src / "Time", time_track, 96, f"{lang}/Time")
     builder.copy_by_name(base + FOLDER_DATE, src / "Date", date_track, 31, f"{lang}/Date")
     builder.copy_by_name(base + FOLDER_MONTH, src / "Month", month_track, 12, f"{lang}/Month")
+    promises = mp3_files(src / "monthly_promise")
+    if promises:
+        builder.copy_by_name(base + FOLDER_MONTH, src / "monthly_promise", promise_track, None,
+                             f"{lang}/monthly_promise (month-jan.mp3 -> 101 ... month-dec.mp3 -> 112)")
+        found = {promise_track(f.name) for f in promises}
+        missing = [MONTHS[n][:3] for n in range(12) if PROMISE_FIRST_TRACK + n not in found]
+        if missing:
+            builder.warnings.append(f"{lang}/monthly_promise: no file for {', '.join(missing)} (nothing plays in those months)")
+    else:
+        builder.warnings.append(f"{lang}/monthly_promise: no .mp3 files, no monthly promise in this language")
     builder.copy_by_name(base + FOLDER_DAY, src / "Day", day_track, 7, f"{lang}/Day")
     builder.copy_by_name(base + FOLDER_YEAR, src / "Year", year_track, None, f"{lang}/Year (year-2026.mp3 -> 026)")
     dongle = mp3_files(src / "Dongle")

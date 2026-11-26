@@ -91,24 +91,24 @@ bool readSlots(const char* name, SlotSet& set) {
   return ok;
 }
 
-// Reads the specific minutes of a Program ("HHMMF" entries joined with commas,
-// empty = none). Answers 400 and returns false if the text is not valid.
+// Reads the specific minutes of a Program ("HHMMFF" entries joined with commas,
+// FF = ExactFlag bits as two hex digits; empty = none). Answers 400 and returns false if the text is not valid.
 bool readExactTimes(const char* name, Program& p) {
   String text = server.arg(name);
   uint8_t count = 0;
   size_t i = 0;
   bool ok = true;
   while (ok && i < text.length()) {
-    ok = count < MAX_EXACT_TIMES && i + 5 <= text.length();
+    ok = count < MAX_EXACT_TIMES && i + 6 <= text.length();
     for (size_t k = 0; ok && k < 4; k++) ok = isdigit((unsigned char)text[i + k]);
     if (!ok) break;
     uint8_t hour = (text[i] - '0') * 10 + (text[i + 1] - '0');
     uint8_t minute = (text[i + 2] - '0') * 10 + (text[i + 3] - '0');
-    char flag[2] = { text[i + 4], '\0' };
-    ok = hour < 24 && minute < 60 && isxdigit((unsigned char)flag[0]);
+    char flag[3] = { text[i + 4], text[i + 5], '\0' };
+    ok = hour < 24 && minute < 60 && isxdigit((unsigned char)flag[0]) && isxdigit((unsigned char)flag[1]);
     if (!ok) break;
     p.exact[count++] = { hour, minute, (uint8_t)(strtol(flag, nullptr, 16) & EXACT_ALL) };
-    i += 5;
+    i += 6;
     if (i < text.length()) {
       ok = text[i] == ',';
       i++;
@@ -152,7 +152,7 @@ void redrawLcdMenu() {
 // block of memory instead of growing (and being copied) many times while it is built.
 const size_t STATUS_JSON_SIZE   = 512;  // the status, with up to about 40 SD card folders
 const size_t SCHEDULE_JSON_SIZE = 80;   // one schedule
-const size_t PROGRAM_JSON_SIZE  = 260;  // one Program: four time lists and 20 specific minutes
+const size_t PROGRAM_JSON_SIZE  = 320;  // one Program: five time lists and 20 specific minutes
 const size_t SETTINGS_JSON_SIZE = 440 + PROGRAM_COUNT * PROGRAM_JSON_SIZE;
 
 void addStatusJson(String& json) {
@@ -182,24 +182,26 @@ void addStatusJson(String& json) {
   json += "]}";
 }
 
-// Specific minutes as "HHMMF" entries joined with commas (F = ExactFlag bits as one hex digit)
+// Specific minutes as "HHMMFF" entries joined with commas (FF = ExactFlag bits as two hex digits)
 void exactToText(const Program& p, String& json) {
-  char entry[8];
+  char entry[9];
   for (uint8_t i = 0; i < p.exactCount; i++) {
-    snprintf(entry, sizeof(entry), "%s%02d%02d%x", i ? "," : "", p.exact[i].hour, p.exact[i].minute, p.exact[i].flags & EXACT_ALL);
+    snprintf(entry, sizeof(entry), "%s%02d%02d%02x", i ? "," : "", p.exact[i].hour, p.exact[i].minute, p.exact[i].flags & EXACT_ALL);
     json += entry;
   }
 }
 
-// One Program: t, h, s, b = Teller, Happy, Sunday and Blessing quarter-hours; x = specific minutes
+// One Program: t, h, s, b, p = Teller, Happy, Sunday, Blessing and Promise quarter-hours;
+// x = specific minutes
 void addProgramJson(String& json, const Program& p) {
-  char teller[25], happy[25], sunday[25], blessing[25], buf[140];
+  char teller[25], happy[25], sunday[25], blessing[25], promise[25], buf[170];
   slotsToHex(p.tellerTimes, teller);
   slotsToHex(p.happyTimes, happy);
   slotsToHex(p.sundayTimes, sunday);
   slotsToHex(p.blessingTimes, blessing);
-  snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"h\":\"%s\",\"s\":\"%s\",\"b\":\"%s\",\"x\":\"",
-           teller, happy, sunday, blessing);
+  slotsToHex(p.promiseTimes, promise);
+  snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"h\":\"%s\",\"s\":\"%s\",\"b\":\"%s\",\"p\":\"%s\",\"x\":\"",
+           teller, happy, sunday, blessing, promise);
   json += buf;
   exactToText(p, json);
   json += "\"}";
@@ -283,15 +285,15 @@ void handleSaveSettings() {
   if (!authorized()) return;
   Settings updated = settings;
   long v;
-  // Program i is sent as p<i>t, p<i>h, p<i>s, p<i>b (quarter-hours) and p<i>x (specific minutes)
+  // Program i is sent as p<i>t, p<i>h, p<i>s, p<i>b, p<i>p (quarter-hours) and p<i>x (specific minutes)
   char key[6];
-  const char kinds[] = "thsbx";
+  const char kinds[] = "thsbpx";
   for (uint8_t i = 0; i < PROGRAM_COUNT; i++) {
     Program& p = updated.programs[i];
-    SlotSet* lists[4] = { &p.tellerTimes, &p.happyTimes, &p.sundayTimes, &p.blessingTimes };
-    for (uint8_t k = 0; k < 5; k++) {
+    SlotSet* lists[5] = { &p.tellerTimes, &p.happyTimes, &p.sundayTimes, &p.blessingTimes, &p.promiseTimes };
+    for (uint8_t k = 0; k < 6; k++) {
       snprintf(key, sizeof(key), "p%d%c", i, kinds[k]);
-      if (k < 4 ? !readSlots(key, *lists[k]) : !readExactTimes(key, p)) return;
+      if (k < 5 ? !readSlots(key, *lists[k]) : !readExactTimes(key, p)) return;
     }
   }
   if (!readNumber("program", 0, PROGRAM_COUNT - 1, v)) return;

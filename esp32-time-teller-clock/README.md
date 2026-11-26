@@ -35,9 +35,9 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Start-up time | About 70 s | A few seconds (plus Wi-Fi sync, if set) |
 | Internet time | Copied when the internet is reachable | Copied only after a real NTP answer |
 | Morning/evening volume | Uses the system clock; switches at 5 AM and 5 PM | Uses the RTC; the switch times can be changed on the phone |
-| Announcement order | Rhythm, wishing, time, date, month, weekday, church name, quote, extra quote, song | Adds a bell (dongle) before the time, the year after the weekday, and a blessing prayer after the church name (see [Playback order](#playback-order)) |
+| Announcement order | Rhythm, wishing, time, date, month, weekday, church name, quote, extra quote, song | Adds a bell (dongle) before the time, the year after the weekday, and a monthly promise and a blessing prayer after the church name (see [Playback order](#playback-order)) |
 
-Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Sunday Silence and the LCD menu. On top of the Pi version, the ESP32 has [three Programs of times, specific minutes](#programs-and-specific-minutes), [three languages](#languages), four happy song periods, Blessing times, [season based songs](#season-based-songs), the [MP3 Player Relay](#mp3-player-relay) and [admin and user logins](#logins-admin-and-user). The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
+Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Sunday Silence and the LCD menu. On top of the Pi version, the ESP32 has [three Programs of times, specific minutes](#programs-and-specific-minutes), [three languages](#languages), four happy song periods, Blessing times, the [monthly promise](#monthly-promise), [season based songs](#season-based-songs), the [MP3 Player Relay](#mp3-player-relay) and [admin and user logins](#logins-admin-and-user). The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
 
 > **Updating from the first ESP32 version:** the SD card folder numbers have changed. Build the card again with `prepare_sd_card.py --overwrite`. The new menu settings start at their defaults, which match the old behavior: an announcement and a happy song every 15 minutes.
 
@@ -56,11 +56,12 @@ Every announcement plays these clips one after another. The order is set in `pla
 | 7 | Spoken weekday | `06` | `001` = Sunday … `007` = Saturday |
 | 8 | Spoken year | `16` | Year − 2000, e.g. `026` = 2026 |
 | 9 | Church name (if *Church Name* is ON) | `07` | Random |
-| 10 | Blessing prayer (at the *Blessing* times) | `18` | Random |
-| 11 | Quote | `08` | Random |
-| 12 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
-| 13 | Song for this time: season, monthly, Sunday or happy song | `21`–`24`, `13`, `12`, or `19`/`10`/`11`/`20` | Random, or none (see [season based songs](#season-based-songs), [Which song plays](../README.md#which-song-plays) and [happy song periods](#happy-song-periods)) |
-| 14 | Custom song (schedules with a song only) | `14`, or `25`–`33` | The schedule's file number, or random from its sub-folder |
+| 10 | Monthly promise (at the *Promise* times) | `05` | This month's file: `101` = January … `112` = December |
+| 11 | Blessing prayer (at the *Blessing* times) | `18` | Random |
+| 12 | Quote | `08` | Random |
+| 13 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
+| 14 | Song for this time: season, monthly, Sunday or happy song | `21`–`24`, `13`, `12`, or `19`/`10`/`11`/`20` | Random, or none (see [season based songs](#season-based-songs), [Which song plays](../README.md#which-song-plays) and [happy song periods](#happy-song-periods)) |
+| 15 | Custom song (schedules with a song only) | `14`, or `25`–`33` | The schedule's file number, or random from its sub-folder |
 
 A step whose folder or file is missing on the SD card is skipped. A random folder or the bell folder that is empty at startup is skipped at once. A missing numbered file (time, date, month, day, year) is skipped when the MP3 module reports it, or after 2 seconds.
 
@@ -70,10 +71,10 @@ An announcement starts at a quarter-hour that is ON in *Teller* in the active Pr
 
 The clock has three sets of times: **Program 1**, **Program 2** and **Program 3**. It uses one of them at a time, chosen under **Times → The clock uses** on the phone page, or with *Program* in the LCD menu. Each Program has:
 
-- four quarter-hour lists: **Teller** (when announcements play), **Happy songs**, **Sunday songs** and **Blessing** (when the blessing prayer plays);
-- up to 20 **specific minutes**, e.g. 6:05 AM, each with its own *Teller*, *Happy song*, *Sunday song* and *Blessing* switches. At a minute that is not :00, :15, :30 or :45 there is no spoken time, because the Time folder has clips for quarter-hours only.
+- five quarter-hour lists: **Teller** (when announcements play), **Happy songs**, **Sunday songs**, **Blessing** (when the blessing prayer plays) and **Promise** (when the [monthly promise](#monthly-promise) plays);
+- up to 20 **specific minutes**, e.g. 6:05 AM, each with its own *Teller*, *Happy song*, *Sunday song*, *Blessing* and *Monthly promise* switches. At a minute that is not :00, :15, :30 or :45 there is no spoken time, because the Time folder has clips for quarter-hours only.
 
-The LCD menus *Teller Times*, *Happy Songs*, *Sunday Songs* and *Blessing Times* change the Program in use. Specific minutes can only be changed on the phone. Schedules don't belong to a Program: they run whichever Program is used.
+The LCD menus *Teller Times*, *Happy Songs*, *Sunday Songs*, *Blessing Times* and *Promise Times* change the Program in use. Specific minutes can only be changed on the phone. Schedules don't belong to a Program: they run whichever Program is used.
 
 After updating from a version without Programs, Program 1 keeps your old times, with the blessing prayer at every time (as before). Programs 2 and 3 start as copies of Program 1.
 
@@ -91,6 +92,14 @@ If the folder for that time has no songs, no happy song plays.
 ### Languages
 
 `Audio-files-for-esp32-new/` has one folder per language: `Language_1`, `Language_2` and `Language_3`. Each holds the full set of folders (`Rythem`, `Time`, `Date`, …, `Custom_songs`). Choose the language under **Language** on the phone page, or with *Language* in the LCD menu. Every clip of the announcement, the songs, the custom songs and the test song then come from that language. After a change, the clock counts that language's files again (on the phone at once, from the LCD when you are back on the home screen).
+
+### Monthly promise
+
+Each language folder has a `monthly_promise` folder with one file per month: `month-jan.mp3`, `month-feb.mp3` … `month-dec.mp3`. The month can be written short or in full (`month-sept.mp3` and `month-september.mp3` both work), but needs at least 3 letters.
+
+At the times that are ON in the **Promise** tab (or LCD menu *Promise Times*), this month's file plays right after the church name. In January that is `month-jan.mp3`. All Promise times start OFF, and a month with no file is skipped.
+
+`prepare_sd_card.py` puts these files in the **Month folder** (`05` for Language_1) as `101.mp3` = January … `112.mp3` = December, next to the spoken month names (`001`–`012`). They don't need a folder of their own, and all 99 folder numbers are already taken. After adding or changing a promise file, build the SD card again.
 
 ### Season based songs
 
@@ -137,7 +146,7 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 |---------|-----------------|
 | **Play** | **Test song**, **Announce now** (plays the announcement for the current time; the spoken time only exists at :00, :15, :30 and :45), and **Stop** (stops anything that is playing). Also shows what is playing. |
 | **Date & time** | Set the clock to the phone's time with one tap, or type a date and time. The clock's current time is shown at the top of the page. |
-| **Times** | **The clock uses** picks the active Program; the **Program 1/2/3** buttons pick the one to edit (✓ = in use). Four tabs: **Teller** (when announcements play), **Happy songs**, **Sunday songs** and **Blessing**. Each shows all 96 quarter-hours as boxes to tap. Tap an hour's label to switch its four boxes together. The shortcuts are **All ON**, **All OFF**, **Every hour** and **Same as Teller**. A dashed box means a song or blessing is set but Teller is OFF at that time. Below the boxes, **Specific minutes** adds times at any minute. See [Programs and specific minutes](#programs-and-specific-minutes). |
+| **Times** | **The clock uses** picks the active Program; the **Program 1/2/3** buttons pick the one to edit (✓ = in use). Five tabs: **Teller** (when announcements play), **Happy songs**, **Sunday songs**, **Blessing** and **Promise** (monthly promise). Each shows all 96 quarter-hours as boxes to tap. Tap an hour's label to switch its four boxes together. The shortcuts are **All ON**, **All OFF**, **Every hour** and **Same as Teller**. A dashed box means a song, blessing or promise is set but Teller is OFF at that time. Below the boxes, **Specific minutes** adds times at any minute. See [Programs and specific minutes](#programs-and-specific-minutes). |
 | **Language** *(admin)* | Language 1, 2 or 3: which `Language_N` folder the audio comes from |
 | **Sunday Silence** | ON/OFF, start and end time |
 | **Monthly Songs** | Tap the months that play monthly songs |
@@ -294,7 +303,7 @@ Each language has a block of 33 folders: **Language_1 = `01`–`33`, Language_2 
 | `02` | Wishing | Random |
 | `03` | Time: `001` = 12:00 AM, `002` = 12:15 AM … `026` = 6:15 AM … `096` = 11:45 PM | hour × 4 + minute ÷ 15 + 1 |
 | `04` | Date: `001`–`031` | Day of the month |
-| `05` | Month: `001` = January … `012` = December | Month number |
+| `05` | Month: `001` = January … `012` = December. Also `monthly_promise`: `101` = `month-jan.mp3` … `112` = `month-dec.mp3` | Month number; 100 + month number for the monthly promise |
 | `06` | Day: `001` = Sunday … `007` = Saturday | Weekday |
 | `07` | church_name | Random (if *Church Name* is ON) |
 | `08` | Quotes | Random |
