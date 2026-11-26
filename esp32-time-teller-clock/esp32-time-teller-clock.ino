@@ -6,7 +6,8 @@
  *
  * At the times chosen in the "Teller Times" menu, and at the times of the
  * schedules, it plays:
- *   rhythm -> wishing -> time -> church name -> date -> month -> day -> quote
+ *   rhythm -> wishing -> dongle (bell, rung once per hour) -> time -> date
+ *   -> month -> day -> year -> church name -> blessing prayer -> quote
  *   -> extra quote -> song
  * The song is a monthly, Sunday or happy song as set in the menu; a schedule's
  * custom song plays after it.
@@ -130,6 +131,9 @@ const uint8_t FOLDER_SUNDAY_SONGS  = 12;  // random file
 const uint8_t FOLDER_MONTHLY_SONGS = 13;  // random file
 const uint8_t FOLDER_CUSTOM        = 14;  // Custom_songs/*.mp3 (SONG_TRACK schedules)
 const uint8_t FOLDER_TEST          = 15;  // 001.mp3 = Testsong.mp3
+const uint8_t FOLDER_YEAR          = 16;  // 001-255 = 2001 ... 2255 (year - 2000)
+const uint8_t FOLDER_DONGLE        = 17;  // 001.mp3 = one bell sound, rung once per hour (12-hour clock)
+const uint8_t FOLDER_BLESSING      = 18;  // random file (blessing prayer)
 const uint8_t FOLDER_FIRST_CUSTOM  = 20;  // folders 20-99 = Custom_songs sub-folders (SONG_FOLDER schedules)
 
 // The clock asks the MP3 module how many files each random folder holds.
@@ -311,7 +315,7 @@ uint8_t silenceIndex = 0;      // 0 ON/OFF, 1 start time, 2 end time
 bool silenceAdjusting = false;
 
 // Player
-const uint8_t MAX_CLIPS = 12;
+const uint8_t MAX_CLIPS = 32;  // up to 12 bell rings + 13 other clips
 Clip playlist[MAX_CLIPS];
 uint8_t playlistLen = 0;
 uint8_t playlistPos = 0;
@@ -645,8 +649,8 @@ void countScheduleFolders() {
 // Counts the files in every folder that is played at random
 void countAllFolders() {
   const uint8_t randomFolders[] = {
-    FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_CHURCH_NAME, FOLDER_QUOTES, FOLDER_EXTRA_QUOTES,
-    FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
+    FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_DONGLE, FOLDER_CHURCH_NAME, FOLDER_BLESSING,
+    FOLDER_QUOTES, FOLDER_EXTRA_QUOTES, FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS
   };
   memset(folderCounts, 0, sizeof(folderCounts));
   memset(folderCounted, 0, sizeof(folderCounted));
@@ -831,13 +835,24 @@ void playAnnouncement(const DateTime& t, int scheduleIndex) {
   playlistClear();
   playlistAddRandom(FOLDER_RYTHEM, nullptr);
   playlistAddRandom(FOLDER_WISHING, nullptr);
+  // Dongle: the bell rings once per hour on a 12-hour clock (5 AM / 5 PM = 5, 12 = 12)
+  if (folderCounts[FOLDER_DONGLE] > 0) {
+    uint8_t rings = t.hour() % 12 == 0 ? 12 : t.hour() % 12;
+    for (uint8_t i = 0; i < rings; i++) playlistAdd(FOLDER_DONGLE, 1, nullptr);
+  } else {
+    Serial.printf("Folder %02d is empty or missing, skipping\n", FOLDER_DONGLE);
+  }
   if (t.minute() % 15 == 0) {  // time clips exist only for quarter-hours
     playlistAdd(FOLDER_TIME, slotOf(t) + 1, nullptr);
   }
-  if (settings.churchName) playlistAddRandom(FOLDER_CHURCH_NAME, nullptr);
+  // Files picked by number (time, date, month, day, year) are skipped by the
+  // player if they are missing on the SD card
   playlistAdd(FOLDER_DATE, t.day(), nullptr);
   playlistAdd(FOLDER_MONTH, t.month(), nullptr);
   playlistAdd(FOLDER_DAY, t.dayOfTheWeek() + 1, nullptr);  // RTClib: 0 = Sunday
+  playlistAdd(FOLDER_YEAR, t.year() - 2000, nullptr);      // 2026 -> 026.mp3
+  if (settings.churchName) playlistAddRandom(FOLDER_CHURCH_NAME, nullptr);
+  playlistAddRandom(FOLDER_BLESSING, nullptr);
   playlistAddRandom(FOLDER_QUOTES, nullptr);
   if (settings.extraQuotes) playlistAddRandom(FOLDER_EXTRA_QUOTES, nullptr);
 

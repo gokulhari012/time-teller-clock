@@ -35,7 +35,7 @@ The MP3-TF-16P reads the SD card by itself. The ESP32 can only send it commands 
 | Start-up time | About 70 s | A few seconds (plus Wi-Fi sync, if set) |
 | Internet time | Copied when the internet is reachable | Copied only after a real NTP answer |
 | Morning/evening volume | Uses the system clock; switches at 5 AM and 5 PM | Uses the RTC; the switch times can be changed on the phone |
-| Church name clip | After the weekday | Right after the spoken time (see [Playback order](#playback-order)) |
+| Announcement order | Rhythm, wishing, time, date, month, weekday, church name, quote, extra quote, song | Adds a bell (dongle) before the time, the year after the weekday, and a blessing prayer after the church name (see [Playback order](#playback-order)) |
 
 Everything else behaves the same: the song rules (monthly, Sunday and happy songs), Teller Times, Sunday Silence and the LCD menu. The main README describes them under [How an announcement works](../README.md#how-an-announcement-works) and [Using the clock](../README.md#using-the-clock-front-panel).
 
@@ -49,15 +49,20 @@ Every announcement plays these clips one after another. The order is set in `pla
 |---|------|-----------|------------------------|
 | 1 | Rhythm / intro music | `01` | Random |
 | 2 | Greeting ("wishing") | `02` | Random |
-| 3 | Spoken time (quarter-hours only) | `03` | hour × 4 + minute ÷ 15 + 1 |
-| 4 | Church name (if *Church Name* is ON) | `07` | Random |
+| 3 | Dongle (bell) | `17` | `001`, rung once per hour on a 12-hour clock: 5 AM or 5 PM rings 5 times, 12 rings 12 times |
+| 4 | Spoken time (quarter-hours only) | `03` | hour × 4 + minute ÷ 15 + 1 |
 | 5 | Spoken date | `04` | Day of the month |
 | 6 | Spoken month | `05` | Month number |
 | 7 | Spoken weekday | `06` | `001` = Sunday … `007` = Saturday |
-| 8 | Quote | `08` | Random |
-| 9 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
-| 10 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `10`/`11` | Random, or none (see [Which song plays](../README.md#which-song-plays)) |
-| 11 | Custom song (schedules with a song only) | `14`, or `20`–`99` | The schedule's file number, or random from its folder |
+| 8 | Spoken year | `16` | Year − 2000, e.g. `026` = 2026 |
+| 9 | Church name (if *Church Name* is ON) | `07` | Random |
+| 10 | Blessing prayer | `18` | Random |
+| 11 | Quote | `08` | Random |
+| 12 | Extra quote (if *Extra Quotes* is ON) | `09` | Random |
+| 13 | Song for this time: monthly, Sunday or happy song | `13`, `12`, or `10`/`11` | Random, or none (see [Which song plays](../README.md#which-song-plays)) |
+| 14 | Custom song (schedules with a song only) | `14`, or `20`–`99` | The schedule's file number, or random from its folder |
+
+A step whose folder or file is missing on the SD card is skipped. A random folder or the bell folder that is empty at startup is skipped at once. A missing numbered file (time, date, month, day, year) is skipped when the MP3 module reports it, or after 2 seconds.
 
 An announcement starts at a quarter-hour that is ON in *Teller Times*, or at a time where a schedule matches the hour, minute, weekday and month. Nothing plays during Sunday Silence, or while the previous announcement is still playing.
 
@@ -208,9 +213,12 @@ To rebuild a card that already has numbered folders, add `--overwrite`. This del
 | `13` | monthly_songs | Random |
 | `14` | `Custom_songs/*.mp3` in name order, except the test song | Number given in a schedule |
 | `15` | `001` = `Custom_songs/Testsong.mp3` | Test button |
+| `16` | Year: `Year/year-2026.mp3` → `026` (2001–2255) | Year − 2000 |
+| `17` | Dongle: `001` = the first file in `Dongle/` (one bell sound) | Rung once per hour (12-hour clock) |
+| `18` | Blessing_prayer | Random |
 | `20`–`99` | One folder per `Custom_songs/` sub-folder, in name order | Random, for a folder schedule |
 
-Folders 16–19 are unused, so new fixed folders can be added later without renumbering the custom folders.
+Folder 19 is unused, so a new fixed folder can be added later without renumbering the custom folders.
 
 At startup the clock asks the module how many files are in each random folder. Any folder with no files is listed on the LCD (`No files in N:` followed by the folder numbers) and then skipped when playing. If you add songs later, tap **Rescan SD card** on the phone page, or restart the clock.
 

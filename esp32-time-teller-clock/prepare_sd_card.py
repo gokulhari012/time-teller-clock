@@ -38,11 +38,13 @@ FOLDER_RYTHEM, FOLDER_WISHING, FOLDER_TIME, FOLDER_DATE, FOLDER_MONTH, FOLDER_DA
 FOLDER_CHURCH_NAME, FOLDER_QUOTES, FOLDER_EXTRA_QUOTES = 7, 8, 9
 FOLDER_HAPPY_MORNING, FOLDER_HAPPY_EVENING, FOLDER_SUNDAY_SONGS, FOLDER_MONTHLY_SONGS = 10, 11, 12, 13
 FOLDER_CUSTOM, FOLDER_TEST, FIRST_CUSTOM_FOLDER = 14, 15, 20
+FOLDER_YEAR, FOLDER_DONGLE, FOLDER_BLESSING = 16, 17, 18
 
 TIME_RE = re.compile(r"^time-(\d{1,2}) (\d{2}) (AM|PM)\.mp3$", re.IGNORECASE)
 DATE_RE = re.compile(r"^date-(\d{1,2})\.mp3$", re.IGNORECASE)
 MONTH_RE = re.compile(r"^month-([a-z]+)\.mp3$", re.IGNORECASE)
 DAY_RE = re.compile(r"^day-([a-z]+)\.mp3$", re.IGNORECASE)
+YEAR_RE = re.compile(r"^year-(\d{4})\.mp3$", re.IGNORECASE)
 
 
 def mp3_files(folder):
@@ -89,6 +91,14 @@ def day_track(name):
     return DAYS.index(match.group(1).lower()) + 1
 
 
+def year_track(name):
+    """year-2026.mp3 -> 26  (2001 = 1 ... 2255 = 255)"""
+    match = YEAR_RE.match(name)
+    if not match or not 2001 <= int(match.group(1)) <= 2255:
+        return None
+    return int(match.group(1)) - 2000
+
+
 class SdCardBuilder:
     def __init__(self, source, dest):
         self.source = source
@@ -113,7 +123,8 @@ class SdCardBuilder:
         self.sections.append((f"{folder:02d}  {title}  ({len(files)} files)", lines))
 
     def copy_by_name(self, folder, source_folder, track_for_name, expected, title):
-        """Number the files from their names (time, date, month, day)."""
+        """Number the files from their names (time, date, month, day, year).
+        expected=None: any number of files, no missing-file warning (year)."""
         lines, used = [], {}
         for file in mp3_files(self.source / source_folder):
             track = track_for_name(file.name)
@@ -124,6 +135,12 @@ class SdCardBuilder:
             else:
                 used[track] = file.name
                 lines.append((track, self._copy(file, folder, track)))
+        if expected is None:
+            if not used:
+                self.warnings.append(f"{title}: no .mp3 files, folder {folder:02d} not created")
+            self.sections.append((f"{folder:02d}  {title}  ({len(used)} files)",
+                                  [line for _, line in sorted(lines)]))
+            return
         missing = [n for n in range(1, expected + 1) if n not in used]
         if missing:
             self.warnings.append(f"{title}: missing {len(missing)} of {expected} files "
@@ -175,6 +192,12 @@ def main():
     builder.copy_by_name(FOLDER_DATE, "Date", date_track, 31, "Date")
     builder.copy_by_name(FOLDER_MONTH, "Month", month_track, 12, "Month")
     builder.copy_by_name(FOLDER_DAY, "Day", day_track, 7, "Day")
+    builder.copy_by_name(FOLDER_YEAR, "Year", year_track, None, "Year (year-2026.mp3 -> 026)")
+    dongle = mp3_files(source / "Dongle")
+    if len(dongle) > 1:
+        builder.warnings.append(f"Dongle: {len(dongle)} files, only the first ({dongle[0].name}) is used as the bell")
+    builder.copy_in_order(FOLDER_DONGLE, dongle[:1], "Dongle (bell, rung once per hour)")
+    builder.copy_in_order(FOLDER_BLESSING, mp3_files(source / "Blessing_prayer"), "Blessing_prayer (random)")
     builder.copy_in_order(FOLDER_CHURCH_NAME, mp3_files(source / "church_name"), "church_name (random)")
     builder.copy_in_order(FOLDER_QUOTES, mp3_files(source / "Quotes"), "Quotes (random)")
     builder.copy_in_order(FOLDER_EXTRA_QUOTES, mp3_files(source / "extra_quotes"), "extra_quotes (random)")
