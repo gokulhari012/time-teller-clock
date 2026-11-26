@@ -128,17 +128,19 @@ void addStatusJson(String& json) {
 }
 
 void addSettingsJson(String& json) {
-  char teller[25], happy[25], sunday[25], buf[420];
+  char teller[25], happy[25], sunday[25], buf[520];
   slotsToHex(settings.tellerTimes, teller);
   slotsToHex(settings.happyTimes, happy);
   slotsToHex(settings.sundayTimes, sunday);
   snprintf(buf, sizeof(buf),
            "{\"teller\":\"%s\",\"happy\":\"%s\",\"sunday\":\"%s\",\"silenceOn\":%d,\"silenceStart\":%d,"
            "\"silenceEnd\":%d,\"months\":%d,\"churchName\":%d,\"extraQuotes\":%d,\"speaker\":%d,"
-           "\"volMorning\":%d,\"volEvening\":%d,\"morningFrom\":%d,\"eveningFrom\":%d}",
+           "\"volMorning\":%d,\"volEvening\":%d,\"morningFrom\":%d,\"eveningFrom\":%d,"
+           "\"showPhone\":%d,\"phone\":\"%s\",\"startName\":\"%s\"}",
            teller, happy, sunday, settings.silenceOn, settings.silenceStart, settings.silenceEnd,
            settings.monthlySongs, settings.churchName, settings.extraQuotes, settings.speakerOutput,
-           settings.morningVolume, settings.eveningVolume, settings.morningFrom, settings.eveningFrom);
+           settings.morningVolume, settings.eveningVolume, settings.morningFrom, settings.eveningFrom,
+           settings.showPhone, settings.phone, settings.startName);
   json += buf;
 }
 
@@ -163,7 +165,7 @@ void sendStatus() {
 
 void sendState() {
   String json;
-  json.reserve(400 + scheduleCount * SCHEDULE_JSON_SIZE + STATUS_JSON_SIZE);  // settings + schedules + status
+  json.reserve(500 + scheduleCount * SCHEDULE_JSON_SIZE + STATUS_JSON_SIZE);  // settings + schedules + status
   json += "{\"settings\":";
   addSettingsJson(json);
   json += ",\"schedules\":";
@@ -222,6 +224,13 @@ void handleSaveSettings() {
   updated.morningFrom = v;
   if (!readNumber("eveningFrom", 0, SLOT_COUNT - 1, v)) return;
   updated.eveningFrom = v;
+  // Startup screen: optional, so an older page that doesn't send these still saves
+  if (server.hasArg("showPhone")) {
+    if (!readNumber("showPhone", 0, 1, v)) return;
+    updated.showPhone = v;
+  }
+  if (server.hasArg("phone")) cleanName(server.arg("phone"), updated.phone, sizeof(updated.phone));
+  if (server.hasArg("startName")) cleanName(server.arg("startName"), updated.startName, sizeof(updated.startName));
 
   settings = updated;
   saveSettings();

@@ -109,6 +109,13 @@ const uint8_t LCD_ADDRESS = 0x27;  // from an I2C scanner; usually 0x27 or 0x3F
 // "MP3 module / not found" at startup, set this to false.
 const bool MP3_USE_ACK = true;
 
+// ---- Startup screens ----
+// Shown on the LCD at power-up, 2 seconds each: the mobile number, then the name.
+// Both can be changed on the phone page (Startup screen); these are the first-boot defaults.
+const char* const DEFAULT_PHONE      = "9043172726";
+const char* const DEFAULT_START_NAME = "KAIROSE TECH";
+const uint32_t STARTUP_SCREEN_MS     = 2000;
+
 // ---- Daily restart ----
 // Restart every day at 03:55, like the Pi's cron reboot (also re-syncs Wi-Fi time).
 const bool DAILY_RESTART = true;
@@ -267,6 +274,9 @@ struct Settings {
   uint8_t eveningVolume;  // 0-10, used from eveningFrom until morningFrom
   uint8_t morningFrom;    // quarter-hour slot, default 5:00 AM (phone page only)
   uint8_t eveningFrom;    // quarter-hour slot, default 5:00 PM (phone page only)
+  bool showPhone;         // show the mobile number on the LCD at startup (phone page only)
+  char phone[17];         // mobile number shown at startup (16 characters fit the LCD)
+  char startName[17];     // name shown at startup after the number; empty = not shown
 };
 
 struct Clip {
@@ -390,6 +400,9 @@ void loadSettings() {
   settings.eveningVolume = prefs.getUChar("volEvening", 5);
   settings.morningFrom   = prefs.getUChar("volMornFrom", 20) % SLOT_COUNT;  // 5:00 AM
   settings.eveningFrom   = prefs.getUChar("volEveFrom", 68) % SLOT_COUNT;   // 5:00 PM
+  settings.showPhone     = prefs.getBool("showPhone", true);
+  snprintf(settings.phone, sizeof(settings.phone), "%s", prefs.getString("phone", DEFAULT_PHONE).c_str());
+  snprintf(settings.startName, sizeof(settings.startName), "%s", prefs.getString("startName", DEFAULT_START_NAME).c_str());
   prefs.end();
 }
 
@@ -409,6 +422,9 @@ void saveSettings() {
   prefs.putUChar("volEvening", settings.eveningVolume);
   prefs.putUChar("volMornFrom", settings.morningFrom);
   prefs.putUChar("volEveFrom", settings.eveningFrom);
+  prefs.putBool("showPhone", settings.showPhone);
+  prefs.putString("phone", settings.phone);
+  prefs.putString("startName", settings.startName);
   prefs.end();
   Serial.println("Settings saved.");
 }
@@ -465,6 +481,28 @@ void lcdPrintLine(uint8_t row, const char* text) {
   snprintf(buf, sizeof(buf), "%-16.16s", text);
   lcd.setCursor(0, row);
   lcd.print(buf);
+}
+
+// Text in the middle of an LCD line
+void lcdPrintCentered(uint8_t row, const char* text) {
+  char buf[17];
+  int len = strnlen(text, 16);
+  snprintf(buf, sizeof(buf), "%*s%s", (16 - len) / 2, "", text);
+  lcdPrintLine(row, buf);
+}
+
+// Startup: the mobile number (if turned on), then the name, STARTUP_SCREEN_MS each
+void showStartupScreens() {
+  if (settings.showPhone && settings.phone[0]) {
+    lcdPrintCentered(0, "Mobile number");
+    lcdPrintCentered(1, settings.phone);
+    delay(STARTUP_SCREEN_MS);
+  }
+  if (settings.startName[0]) {
+    lcdPrintCentered(0, settings.startName);
+    lcdPrintLine(1, "");
+    delay(STARTUP_SCREEN_MS);
+  }
 }
 
 // The 2x2 matrix, row by row (L1: R1, R2, then L2: R1, R2), same layout as the Pi's KEYS
@@ -1369,12 +1407,13 @@ void setup() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   lcd.init();
   lcd.backlight();
-  lcdPrintLine(0, "Time Teller");
-  lcdPrintLine(1, "Starting...");
 
   Serial.println("Loading settings...");
   loadSettings();
   loadSchedules();
+  showStartupScreens();
+  lcdPrintLine(0, "Time Teller");
+  lcdPrintLine(1, "Starting...");
 
   Serial.println("Initing RTC...");
   if (!rtc.begin(&Wire)) {

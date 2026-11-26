@@ -96,6 +96,7 @@ If you forget these details, open **Phone Settings** in the LCD menu. It shows t
 | **Sunday Silence** | ON/OFF, start and end time |
 | **Monthly Songs** | Tap the months that play monthly songs |
 | **Announcement** | Church name ON/OFF, extra quotes ON/OFF |
+| **Startup screen** | **Show mobile number** ON/OFF, the **Mobile number** (default `9043172726`), and the **Name** shown after it (default `KAIROSE TECH`; leave it empty to skip it). Up to 16 characters each. Phone-only; shown at the next restart. |
 | **Sound** | Speaker output (relay), morning and evening volume (0–10), and the times the morning and evening volumes start. The start times are phone-only. |
 | **Schedules** | Add, edit, delete, and switch ON/OFF up to 20 schedules. Each has a name, time, days, months, and an optional custom song (one song from folder 14, or a random song from a folder 20–99). |
 | **SD card** | Lists each song folder with its number of files. Empty folders are shown in orange. **Rescan SD card** counts them again after you copy new songs, with no restart needed. |
@@ -307,6 +308,8 @@ Schedules are managed on the phone page. On first boot the clock starts with the
 
 | LCD | LED | Meaning |
 |-----|-----|---------|
+| `Mobile number` / `9043172726` | Off | Shown for 2 s at power-up, if *Show mobile number* is ON on the phone page |
+| `KAIROSE TECH` | Off | The name, shown for 2 s after the number (skipped if the name is empty) |
 | `Time Teller` / `Starting...` | Off | Starting |
 | `RTC not found` / `Check wiring` | Blinking | The RTC isn't answering on I²C. The clock stops here. |
 | `MP3 module` / `not found` | Blinking afterwards | The MP3 module didn't answer. The clock keeps running without sound. See `MP3_USE_ACK`. |

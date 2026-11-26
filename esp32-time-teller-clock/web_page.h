@@ -121,6 +121,14 @@ tr.empty td{color:var(--warn)}
 </section>
 
 <section>
+  <h2>Startup screen</h2>
+  <p class="muted">Shown on the LCD for 2 seconds each when the clock starts. Up to 16 characters.</p>
+  <div class="row first"><span>Show mobile number</span><label class="sw"><input type="checkbox" id="showPhone"><span></span></label></div>
+  <div class="row"><span>Mobile number</span><input type="text" id="phone" maxlength="16" inputmode="tel"></div>
+  <div class="row"><span>Name<br><span class="muted">shown after the number; empty = not shown</span></span><input type="text" id="startName" maxlength="16"></div>
+</section>
+
+<section>
   <h2>Sound</h2>
   <div class="row first"><span>Speaker output (relay)</span><label class="sw"><input type="checkbox" id="speaker"><span></span></label></div>
   <div class="row"><span>Morning volume: <b id="volMorningV"></b></span><input type="range" min="0" max="10" id="volMorning"></div>
@@ -169,7 +177,8 @@ const $ = id => document.getElementById(id);
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FOLDERS = {1: 'Rythem', 2: 'Wishing', 7: 'church_name', 8: 'Quotes', 9: 'extra_quotes',
-  10: 'happy_songs_morning', 11: 'happy_songs_evening', 12: 'sunday_songs', 13: 'monthly_songs'};
+  10: 'happy_songs_morning', 11: 'happy_songs_evening', 12: 'sunday_songs', 13: 'monthly_songs',
+  17: 'Dongle', 18: 'Blessing_prayer'};
 const HELP = {
   teller: 'The time teller runs at the blue times.',
   happy: 'Blue times end with a happy song: morning songs before 12 PM, evening songs after. A dashed box means Teller is OFF at that time, so the song only plays if a schedule runs then.',
@@ -295,11 +304,14 @@ function fill(mode) {  // 0 all ON, 1 all OFF, 2 every hour, 3 same as Teller
 }
 
 // ---- switches, selects and sliders ----
-const SWITCHES = ['silenceOn', 'churchName', 'extraQuotes', 'speaker'];
+const SWITCHES = ['silenceOn', 'churchName', 'extraQuotes', 'speaker', 'showPhone'];
+const TEXTS = ['phone', 'startName'];
+const cleanText = v => v.replace(/[^\x20-\x7e]|["\\]/g, '');  // what the LCD can show
 const NUMBERS = ['silenceStart', 'silenceEnd', 'morningFrom', 'eveningFrom', 'volMorning', 'volEvening'];
 function renderForm() {
   SWITCHES.forEach(k => { $(k).checked = !!S[k]; });
   NUMBERS.forEach(k => { $(k).value = S[k]; });
+  TEXTS.forEach(k => { if (document.activeElement !== $(k)) $(k).value = S[k] || ''; });
   $('volMorningV').textContent = S.volMorning;
   $('volEveningV').textContent = S.volEvening;
 }
@@ -396,7 +408,8 @@ async function save() {
         teller: bitsToHex(S.teller), happy: bitsToHex(S.happy), sunday: bitsToHex(S.sunday),
         silenceOn: S.silenceOn ? 1 : 0, silenceStart: S.silenceStart, silenceEnd: S.silenceEnd, months: S.months,
         churchName: S.churchName ? 1 : 0, extraQuotes: S.extraQuotes ? 1 : 0, speaker: S.speaker ? 1 : 0,
-        volMorning: S.volMorning, volEvening: S.volEvening, morningFrom: S.morningFrom, eveningFrom: S.eveningFrom
+        volMorning: S.volMorning, volEvening: S.volEvening, morningFrom: S.morningFrom, eveningFrom: S.eveningFrom,
+        showPhone: S.showPhone ? 1 : 0, phone: S.phone.trim(), startName: S.startName.trim()
       });
     }
     if (dirtyK) {
@@ -472,6 +485,7 @@ async function poll() {
   document.querySelectorAll('.tabs button').forEach(b => { b.onclick = () => { tab = b.dataset.k; renderGrid(); }; });
   SWITCHES.forEach(k => { $(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; changed(); }; });
   NUMBERS.forEach(k => { $(k).oninput = e => { S[k] = +e.target.value; changed(); renderForm(); }; });
+  TEXTS.forEach(k => { $(k).oninput = e => { S[k] = cleanText(e.target.value); changed(); }; });
   const now = stamp(new Date());
   $('dDate').value = now.slice(0, 10);
   $('dTime').value = now.slice(11, 19);
